@@ -1,0 +1,12 @@
+httpx
+pydantic>=2.0
+pydantic-settings>=2.0
+cryptography
+pycryptodome>=3.0
+python-dotenv>=1.0
+sqlalchemy>=2.0
+apscheduler>=3.10
+tzlocal
+anthropic
+fastapi
+uvicorn
