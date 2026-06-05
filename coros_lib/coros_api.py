@@ -126,12 +126,12 @@ def _mobile_encrypt(plaintext: str, app_key: str) -> str:
     return base64.b64encode(cipher.encrypt(padded)).decode("ascii")
 
 
-async def _mobile_login(email: str, password: str, region: str = "eu") -> tuple[str, dict]:
+async def _mobile_login(email: str, password: str, region: str = "cn") -> tuple[str, dict]:
     """
     Authenticate against the Coros mobile API with encrypted credentials.
     Returns (access_token, login_payload_for_replay).
     """
-    mobile_base = MOBILE_BASE_URLS.get(region, MOBILE_BASE_URLS["eu"])
+    mobile_base = MOBILE_BASE_URLS.get(region, MOBILE_BASE_URLS["cn"])
     url = mobile_base + MOBILE_LOGIN_ENDPOINT
     app_key = str(random.randint(1_000_000_000_000_000, 9_999_999_999_999_999))
     payload = {
@@ -188,7 +188,7 @@ def _base_url(region: str) -> str:
     return BASE_URLS.get(region, BASE_URLS["eu"])
 
 
-async def login(email: str, password: str, region: str = "eu", *, skip_mobile: bool = True) -> StoredAuth:
+async def login(email: str, password: str, region: str = "cn", *, skip_mobile: bool = True) -> StoredAuth:
     """Authenticate against Coros API and persist the token."""
     pwd_hash = _md5(password)
     login_payload = {
@@ -231,7 +231,7 @@ def get_stored_auth() -> StoredAuth | None:
     """Return stored auth if it exists and is not expired."""
     access_token = os.environ.get("COROS_ACCESS_TOKEN")
     if access_token:
-        region = os.environ.get("COROS_REGION", "eu")
+        region = os.environ.get("COROS_REGION", "cn")
         return StoredAuth(
             access_token=access_token,
             user_id="env",
@@ -250,7 +250,7 @@ def get_env_credentials() -> tuple[str, str, str] | None:
     """Return (email, password, region) from env vars, or None if not fully set."""
     email = os.environ.get("COROS_EMAIL")
     password = os.environ.get("COROS_PASSWORD")
-    region = os.environ.get("COROS_REGION", "eu")
+    region = os.environ.get("COROS_REGION", "cn")
     if email and password:
         return email, password, region
     return None
@@ -358,7 +358,7 @@ async def fetch_daily_records(
 
     Merges data from two endpoints:
     - /analyse/dayDetail/query: supports up to ~24 weeks
-    - /analyse/query: last ~28 days, adds VO2max / LTHR / stamina fields
+    - /analyse/query: last ~28 days (fixed), adds VO2max / LTHR / stamina fields
     """
     headers = _auth_headers(auth)
     base = _base_url(auth.region)
@@ -513,7 +513,7 @@ async def _refresh_mobile_token(auth: StoredAuth) -> bool:
     if not auth.mobile_login_payload:
         return False
 
-    mobile_base = MOBILE_BASE_URLS.get(auth.region, MOBILE_BASE_URLS["eu"])
+    mobile_base = MOBILE_BASE_URLS.get(auth.region, MOBILE_BASE_URLS["cn"])
     url = mobile_base + MOBILE_LOGIN_ENDPOINT
     headers: dict[str, str] = {
         "content-type": "application/json",
@@ -574,7 +574,7 @@ async def fetch_sleep(auth: StoredAuth, start_day: str, end_day: str) -> list[Sl
             "for automatic acquisition."
         )
 
-    mobile_base = MOBILE_BASE_URLS.get(auth.region, MOBILE_BASE_URLS["eu"])
+    mobile_base = MOBILE_BASE_URLS.get(auth.region, MOBILE_BASE_URLS["cn"])
     url = mobile_base + ENDPOINTS["sleep"]
     sleep_payload = {
         "allDeviceSleep": 1,
