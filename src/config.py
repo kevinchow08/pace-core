@@ -6,7 +6,9 @@ class Settings(BaseSettings):
     coros_password: str
     coros_region: str = "cn"
 
-    anthropic_api_key: str
+    llm_api_key: str
+    llm_base_url: str
+    llm_model: str
 
     ntfy_topic: str
     db_url: str = "sqlite:///pacecoach.db"

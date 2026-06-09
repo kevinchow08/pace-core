@@ -35,9 +35,9 @@
 | --------------- | --------------------------------------------- | ------------------------------------------------------------------------------- |
 | 语言            | Python 3.11+                                  |                                                                                 |
 | 数据层          | `coros_lib/`（vendor cygnusb/coros-mcp, MIT） | 裁剪后只保留取数函数                                                            |
-| 定时            | APScheduler（AsyncIOScheduler）               | 进程内，档位 2 换 Celery                                                        |
+| 定时            | APScheduler（BlockingScheduler）              | 同步轮询；进程内，档位 2 换 Celery                                              |
 | ORM + 存储      | SQLAlchemy 2.0 + SQLite                       | 档位 2 换 Postgres，只改连接串                                                  |
-| LLM             | Anthropic SDK（Claude）                       | analyzer.py 内部封装，可换 OpenAI                                               |
+| LLM             | OpenAI-compatible SDK（Qwen）                 | analyzer.py 内部封装，通过 base_url / model 切换具体供应商                      |
 | 推送（v0）      | **Ntfy**（ntfy.sh，免费）                     | Android + iOS 通用，后端一行 POST                                               |
 | 推送（Phase 2） | Expo Push（FCM/APNs）                         | Expo App 上线后替换 notifier.py，其他零改动                                     |
 | Web 框架        | FastAPI                                       | 加进 requirements 占位，**v0 不跑 HTTP server**；Expo App 需调后端时再写 routes |
@@ -92,7 +92,7 @@ httpx.post(f"https://ntfy.sh/{settings.NTFY_TOPIC}",
 ## 五、场景 1 数据流
 
 ```
-[AsyncIOScheduler 每 N 分钟轮询]
+[BlockingScheduler 每 N 分钟轮询]
   → coros_client.get_recent_activities()
   → 过滤 store 中已处理的 labelId（去重）
   → 对每条新活动：
@@ -134,19 +134,21 @@ pace-core/
 │   └── jobs.py               # on_new_activity()（启用）/ morning_report()（挂起）
 │
 ├── test_connection.py        # 验证数据能拉出来（第一个验证门）
-└── main.py                   # AsyncIOScheduler 装配；--once 手动触发测试
+└── main.py                   # BlockingScheduler 装配；--once 手动触发测试
 ```
 
 **.env.example**
 
 ```
-COROS_EMAIL=your@email.com
-COROS_PASSWORD=yourpassword
-COROS_REGION=cn
-ANTHROPIC_API_KEY=sk-ant-...
-NTFY_TOPIC=pacecoach-kevin
-DB_URL=sqlite:///pacecoach.db
-POLL_INTERVAL_MINUTES=10
+COROS_EMAIL=
+COROS_PASSWORD=
+COROS_REGION=
+LLM_API_KEY=
+LLM_BASE_URL=
+LLM_MODEL=
+NTFY_TOPIC=
+DB_URL=
+POLL_INTERVAL_MINUTES=
 ```
 
 **requirements.txt**
@@ -159,7 +161,7 @@ pycryptodome>=3.0
 python-dotenv>=1.0
 sqlalchemy>=2.0
 apscheduler>=3.10
-anthropic
+openai
 fastapi
 uvicorn
 ```
