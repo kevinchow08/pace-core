@@ -6,7 +6,7 @@ Two tables:
 - RunLog: raw API responses, useful for debugging when COROS changes their API
 """
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import Column, DateTime, String, Text, create_engine
 from sqlalchemy.orm import DeclarativeBase, Session
@@ -28,7 +28,7 @@ class ProcessedActivity(Base):
     # COROS labelId is the natural primary key for dedupe.
     label_id = Column(String, primary_key=True)
     # Filled when the row is created; used for auditing when we marked it processed.
-    processed_at = Column(DateTime, default=datetime.timezone.utc)
+    processed_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
 class RunLog(Base):
@@ -41,7 +41,7 @@ class RunLog(Base):
     raw_daily = Column(Text)
     coaching = Column(Text)
     # Lets us inspect when the log row was written.
-    created_at = Column(DateTime, default=datetime.timezone.utc)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
 def init_db():
