@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 def on_new_activity() -> None:
     try:
-        activities = coros_client.get_recent_activities(days=3)
+        activities = coros_client.get_recent_activities(days=5)
         # activities is a list of ActivitySummary pydantic objects
         new = [a for a in activities if not store.is_processed(a.activity_id)]
 
@@ -32,7 +32,7 @@ def on_new_activity() -> None:
                 coaching = analyzer.analyze_workout(detail, daily_dicts)
 
                 store.save_run_log(activity_id, detail, daily_dicts, coaching)
-                notifier.push(title="练后点评", body=coaching)
+                # notifier.push(title="练后点评", body=coaching)
                 store.mark_processed(activity_id)
 
                 logger.info(f"Pushed coaching for activity {activity_id}")
