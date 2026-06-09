@@ -1,6 +1,7 @@
 .env
 .venv/
 __pycache__/
+docs/
 *.pyc
 *.db
 .coros_token.json
