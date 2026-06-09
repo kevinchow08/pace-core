@@ -4,11 +4,11 @@ LLM-powered coaching analysis.
 analyze_workout(): active (v0)
 analyze_sleep(): stubbed, activated in v0.1 when sleep data is available
 """
-import anthropic
+from openai import OpenAI
 
 from src.config import settings
 
-_client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+_client = OpenAI(api_key=settings.llm_api_key, base_url=settings.llm_base_url)
 
 _WORKOUT_SYSTEM = """你是一位专业跑步教练，根据运动员的单次训练数据和近期训练趋势给出简短点评。
 
@@ -29,13 +29,15 @@ def analyze_workout(activity: dict, daily_ctx: dict) -> str:
 
 请给出教练点评。"""
 
-    message = _client.messages.create(
-        model="claude-sonnet-4-6",
+    response = _client.chat.completions.create(
+        model=settings.llm_model,
         max_tokens=512,
-        system=_WORKOUT_SYSTEM,
-        messages=[{"role": "user", "content": prompt}],
+        messages=[
+            {"role": "system", "content": _WORKOUT_SYSTEM},
+            {"role": "user", "content": prompt},
+        ],
     )
-    return message.content[0].text
+    return response.choices[0].message.content or ""
 
 
 def analyze_sleep(sleep: dict, hrv: dict) -> str:
