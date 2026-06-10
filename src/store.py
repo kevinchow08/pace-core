@@ -57,14 +57,16 @@ def is_processed(label_id: str) -> bool:
 
 
 def mark_processed(label_id: str):
-    # Insert the marker row and commit immediately so the dedupe state survives exit.
+    # add()：只能插入新记录，主键冲突直接报错（IntegrityError）
+    # 语义是"这条记录必须是第一次写入"，比静默覆盖更严格，能暴露重复调用的 bug
     with Session(engine) as session:
         session.add(ProcessedActivity(label_id=label_id))
         session.commit()
 
 
 def save_run_log(label_id: str, activity: dict, daily: dict, coaching: str):
-    # merge() behaves like an upsert here: update the existing row or insert a new one.
+    # merge()：主键存在则更新，不存在则插入（upsert）
+    # 同一活动因失败重跑时需要覆盖旧记录，所以用 merge 而不是 add
     with Session(engine) as session:
         log = RunLog(
             id=label_id,

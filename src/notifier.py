@@ -16,7 +16,10 @@ def push(title: str, body: str) -> None:
 def _send_ntfy(title: str, body: str) -> None:
     httpx.post(
         f"https://ntfy.sh/{settings.ntfy_topic}",
-        content=body.encode(),
-        headers={"Title": title},
+        content=body.encode("utf-8"),
+        headers={
+            "Title": title.encode("utf-8"),
+            "Priority": "high",
+        },
         timeout=10,
     )
