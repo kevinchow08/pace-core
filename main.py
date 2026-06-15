@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 from src import store
 from src.config import settings
-from src.jobs import on_new_activity
+from src.jobs import on_new_activity, morning_report
 
 
 def main():
@@ -27,6 +27,11 @@ def main():
     if "--once" in sys.argv:
         logger.info("--once mode: running on_new_activity and exiting")
         on_new_activity()
+        return
+
+    if "--morning" in sys.argv:
+        logger.info("--morning mode: running morning_report and exiting")
+        morning_report()
         return
 
     from apscheduler.schedulers.blocking import BlockingScheduler
@@ -39,9 +44,13 @@ def main():
         id="poll_activities",
     )
 
-    # v0.1: morning_report job — uncomment when sleep data is available
-    # from src.jobs import morning_report
-    # scheduler.add_job(morning_report, trigger="cron", hour=7, minute=30, id="morning_report")
+    # 晨报：和练后分析一样走轮询，检测到当天睡眠数据同步后才推，内部去重
+    scheduler.add_job(
+        morning_report,
+        trigger="interval",
+        minutes=settings.poll_interval_minutes,
+        id="morning_report",
+    )
 
     logger.info(f"Scheduler started. Polling every {settings.poll_interval_minutes} minutes.")
     scheduler.start()

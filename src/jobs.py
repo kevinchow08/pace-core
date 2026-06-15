@@ -112,5 +112,49 @@ def on_new_activity() -> None:
 
 
 def morning_report() -> None:
-    # v0.1 — 有睡眠数据后实现
-    logger.info("morning_report: pending sleep data (v0.1), skipping")
+    """
+    今日状态播报。
+
+    触发逻辑：检测到今天的睡眠数据已从 COROS 同步后才推送，避免固定时间推送时数据未就绪。
+    已推送过的日期通过 store 去重，同一天不重复推。
+    """
+    try:
+        from datetime import date
+        today = date.today().strftime("%Y%m%d")
+
+        if store.is_morning_report_sent(today):
+            logger.info("morning_report: already sent for %s, skipping", today)
+            return
+
+        sleep_records = coros_client.get_sleep(days=1)
+        if not sleep_records:
+            logger.info("morning_report: no sleep data yet for today, skipping")
+            return
+
+        sleep = sleep_records[-1]
+        sleep_date = sleep.date if hasattr(sleep, "date") else sleep.get("date", "")
+        if sleep_date != today:
+            logger.info("morning_report: latest sleep date %s != today %s, skipping", sleep_date, today)
+            return
+
+        hrv_records = coros_client.get_hrv()
+        hrv = next((h for h in reversed(hrv_records) if h.date == today), None)
+        if not hrv:
+            logger.info("morning_report: no HRV data for today yet, skipping")
+            return
+
+        daily_ctx = coros_client.get_recent_daily_records(days=7)
+        daily_dicts = [r.model_dump() for r in daily_ctx]
+
+        sleep_dict = sleep.model_dump() if hasattr(sleep, "model_dump") else sleep
+        hrv_dict = hrv.model_dump() if hasattr(hrv, "model_dump") else hrv
+
+        report = analyzer.analyze_morning(sleep_dict, hrv_dict, daily_dicts)
+
+        store.mark_morning_report_sent(today)
+        notifier.push(title="今日状态播报", body=report)
+        logger.info("morning_report: pushed for %s", today)
+
+    except Exception as e:
+        logger.error("morning_report job failed: %s", e)
+        notifier.push(title="PaceCoach Error", body=f"晨报生成失败：{e}")

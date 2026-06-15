@@ -186,6 +186,80 @@ def format_activity(activity: dict) -> str:
     return "\n".join(lines)
 
 
+def format_morning_ctx(sleep: dict, hrv: dict, daily_records: list[dict]) -> str:
+    """
+    Assembles morning broadcast context from last night's sleep, HRV, and recent training load.
+
+    sleep / hrv are model_dump() dicts from SleepRecord / HRVRecord.
+    daily_records: last 7 days of DailyRecord dicts, most recent last.
+    """
+    lines = []
+
+    # --- Sleep ---
+    total_min = sleep.get("total_duration_minutes") or 0
+    phases = sleep.get("phases") or {}
+    deep = phases.get("deep_minutes") or 0
+    light = phases.get("light_minutes") or 0
+    rem = phases.get("rem_minutes") or 0
+    awake = phases.get("awake_minutes") or 0
+    avg_hr = sleep.get("avg_hr")
+
+    total_h, total_m = divmod(total_min, 60)
+    deep_pct = round(deep / total_min * 100) if total_min else 0
+    rem_pct = round(rem / total_min * 100) if total_min else 0
+    light_pct = round(light / total_min * 100) if total_min else 0
+
+    # COROS normal ranges for reference
+    deep_status = "偏低" if deep_pct < 16 else ("偏高" if deep_pct > 30 else "正常")
+    rem_status = "偏低" if rem_pct < 11 else ("偏高" if rem_pct > 35 else "正常")
+    light_status = "偏高" if light_pct > 60 else "正常"
+
+    lines.append("【昨晚睡眠】")
+    lines.append(f"总时长：{total_h}h {total_m}min  清醒：{awake}min")
+    lines.append(
+        f"深睡：{deep}min（{deep_pct}%，{deep_status}）  "
+        f"浅睡：{light}min（{light_pct}%，{light_status}）  "
+        f"REM：{rem}min（{rem_pct}%，{rem_status}）"
+    )
+    if avg_hr:
+        lines.append(f"睡眠均心率：{avg_hr} bpm")
+
+    # --- HRV ---
+    avg_hrv = hrv.get("avg_sleep_hrv")
+    baseline = hrv.get("baseline")
+    sd = hrv.get("standard_deviation")
+
+    if avg_hrv and baseline and sd:
+        low = round(baseline - sd)
+        high = round(baseline + sd)
+        if avg_hrv < low:
+            hrv_status = "偏低（身体有压力）" if avg_hrv >= baseline * 0.85 else "显著偏低（建议充分休息）"
+        elif avg_hrv > high:
+            hrv_status = "偏高（身体放松，注意其他指标）"
+        else:
+            hrv_status = "正常范围"
+
+        lines.append(f"\n【夜间HRV】")
+        lines.append(f"昨夜HRV：{avg_hrv} ms  个人基线：{baseline} ms  正常区间：{low}-{high} ms")
+        lines.append(f"状态：{hrv_status}")
+
+    # --- Recent training load ---
+    if daily_records:
+        lines.append("\n【近7天训练负荷】")
+        lines.append("日期        负荷   疲劳   ATI  静息心率")
+        for r in daily_records[-7:]:
+            date_raw = r.get("date", "")
+            fmt_date = f"{date_raw[:4]}-{date_raw[4:6]}-{date_raw[6:]}" if len(date_raw) == 8 else date_raw
+            load = r.get("training_load") or 0
+            tired = r.get("tired_rate")
+            ati = r.get("ati") or "—"
+            rhr = r.get("rhr") or "—"
+            tired_str = f"{tired:+.0f}" if tired is not None else "—"
+            lines.append(f"{fmt_date}  {load:4d}   {tired_str:>5}  {ati:3}  {rhr}")
+
+    return "\n".join(lines)
+
+
 def format_daily_ctx(records: list[dict]) -> str:
     if not records:
         return "（无近期训练数据）"

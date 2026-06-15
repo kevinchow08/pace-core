@@ -9,7 +9,7 @@ import logging
 from openai import OpenAI
 
 from src.config import settings
-from src.formatter import format_activity, format_daily_ctx
+from src.formatter import format_activity, format_daily_ctx, format_morning_ctx
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +97,61 @@ def analyze_workout(activities: list[dict] | dict, daily_ctx: list[dict]) -> str
     return coaching
 
 
+_MORNING_SYSTEM = """你是一位专业跑步教练，每天早上根据运动员昨晚的睡眠、HRV和近期训练负荷，给出一段今日状态播报。
+
+【HRV 业务理解】
+HRV（心率变异性）反映自主神经系统状态。COROS 使用 RMSSD 指标，结合近30天数据计算个人正常区间（基线 ± 标准差）：
+- 正常范围内：自主神经平衡，可按计划训练
+- 偏高：副交感神经主导，身体放松，但需结合其他指标综合判断
+- 偏低：交感神经偏亢，身体有压力，建议减量或休息
+- 显著偏低：身体压力大，强烈建议充分休息
+
+注意：HRV 反映神经系统恢复，不等于肌肉恢复（DOMS 肌肉酸痛时 HRV 可能正常）。
+
+【睡眠各阶段正常范围】
+- 深睡：16-30%（核心恢复阶段，不足直接影响身体恢复）
+- 浅睡：< 60%（过高说明睡眠质量下降）
+- REM：11-35%（大脑和情绪恢复，不足影响心理状态）
+- 清醒时间：≤ 20min
+
+【疲劳度（tired_rate）解读】
+- 负值：身体处于超量恢复状态，比较新鲜
+- 0附近：正常疲劳水平
+- 正值偏高：疲劳积累，需注意恢复
+
+【今日训练强度建议参考】
+- 各指标均良好 → 可安排中高强度训练
+- HRV 偏低 + 睡眠不佳 → 建议轻松跑或全休
+- 睡眠不佳但 HRV 正常 → 可安排低中强度，注意身体反应
+- 近期疲劳积累高 → 建议主动恢复
+
+【输出要求】
+- 第一句话给出今天整体状态定性（新鲜/正常/略疲劳/需要休息）
+- 简析睡眠亮点或问题（重点说异常，正常就一句带过）
+- HRV + 疲劳综合解读（两者结合，不要割裂）
+- 给出今日具体训练建议（强度 + 类型，要具体）
+- 不超过500字，语言有温度、有判断，不逐条复述数字
+- 不要使用 Z1/Z2 等代号，用中文术语"""
+
+
+def analyze_morning(sleep: dict, hrv: dict, daily_records: list[dict]) -> str:
+    ctx = format_morning_ctx(sleep, hrv, daily_records)
+    prompt = f"{ctx}\n\n请给出今日状态播报。"
+
+    logger.info("Calling LLM for morning report, model=%s", settings.llm_model)
+    response = _client.chat.completions.create(
+        model=settings.llm_model,
+        max_tokens=400,
+        messages=[
+            {"role": "system", "content": _MORNING_SYSTEM},
+            {"role": "user", "content": prompt},
+        ],
+    )
+    result = response.choices[0].message.content or ""
+    logger.info("Morning report result: %s", result[:200])
+    return result
+
+
 def analyze_sleep(sleep: dict, hrv: dict) -> str:
-    # v0.1 — 有睡眠数据后实现
-    raise NotImplementedError("analyze_sleep is pending sleep data (v0.1)")
+    # 已被 analyze_morning() 替代
+    raise NotImplementedError("use analyze_morning() instead")

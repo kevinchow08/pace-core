@@ -31,6 +31,13 @@ class ProcessedActivity(Base):
     processed_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
+class MorningReportLog(Base):
+    __tablename__ = "morning_report_logs"
+
+    date = Column(String, primary_key=True)  # yyyyMMdd
+    sent_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
 class RunLog(Base):
     __tablename__ = "run_logs"
 
@@ -61,6 +68,17 @@ def mark_processed(label_id: str):
     # 语义是"这条记录必须是第一次写入"，比静默覆盖更严格，能暴露重复调用的 bug
     with Session(engine) as session:
         session.add(ProcessedActivity(label_id=label_id))
+        session.commit()
+
+
+def is_morning_report_sent(date: str) -> bool:
+    with Session(engine) as session:
+        return session.get(MorningReportLog, date) is not None
+
+
+def mark_morning_report_sent(date: str):
+    with Session(engine) as session:
+        session.merge(MorningReportLog(date=date))
         session.commit()
 
 
