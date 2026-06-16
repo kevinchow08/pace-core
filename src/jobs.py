@@ -115,32 +115,26 @@ def morning_report() -> None:
     """
     今日状态播报。
 
-    触发逻辑：检测到今天的睡眠数据已从 COROS 同步后才推送，避免固定时间推送时数据未就绪。
-    已推送过的日期通过 store 去重，同一天不重复推。
+    触发逻辑：取最新一条睡眠记录，如果还没推过就推，推过就跳过。
+    不补发历史日期——历史播报对当天决策没有意义。
     """
     try:
-        from datetime import date
-        today = date.today().strftime("%Y%m%d")
-
-        if store.is_morning_report_sent(today):
-            logger.info("morning_report: already sent for %s, skipping", today)
-            return
-
-        sleep_records = coros_client.get_sleep(days=1)
+        sleep_records = coros_client.get_sleep(days=2)
         if not sleep_records:
-            logger.info("morning_report: no sleep data yet for today, skipping")
+            logger.info("morning_report: no sleep data, skipping")
             return
 
         sleep = sleep_records[-1]
         sleep_date = sleep.date if hasattr(sleep, "date") else sleep.get("date", "")
-        if sleep_date != today:
-            logger.info("morning_report: latest sleep date %s != today %s, skipping", sleep_date, today)
+
+        if store.is_morning_report_sent(sleep_date):
+            logger.info("morning_report: already sent for %s, skipping", sleep_date)
             return
 
         hrv_records = coros_client.get_hrv()
-        hrv = next((h for h in reversed(hrv_records) if h.date == today), None)
+        hrv = next((h for h in reversed(hrv_records) if h.date == sleep_date), None)
         if not hrv:
-            logger.info("morning_report: no HRV data for today yet, skipping")
+            logger.info("morning_report: no HRV data for %s yet, skipping", sleep_date)
             return
 
         daily_ctx = coros_client.get_recent_daily_records(days=7)
@@ -151,9 +145,9 @@ def morning_report() -> None:
 
         report = analyzer.analyze_morning(sleep_dict, hrv_dict, daily_dicts)
 
-        store.mark_morning_report_sent(today)
+        store.mark_morning_report_sent(sleep_date)
         notifier.push(title="今日状态播报", body=report)
-        logger.info("morning_report: pushed for %s", today)
+        logger.info("morning_report: pushed for %s", sleep_date)
 
     except Exception as e:
         logger.error("morning_report job failed: %s", e)

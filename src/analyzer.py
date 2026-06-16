@@ -138,6 +138,7 @@ def analyze_morning(sleep: dict, hrv: dict, daily_records: list[dict]) -> str:
     ctx = format_morning_ctx(sleep, hrv, daily_records)
     prompt = f"{ctx}\n\n请给出今日状态播报。"
 
+    logger.info("Morning report context:\n%s", ctx)
     logger.info("Calling LLM for morning report, model=%s", settings.llm_model)
     response = _client.chat.completions.create(
         model=settings.llm_model,
