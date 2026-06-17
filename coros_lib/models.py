@@ -40,6 +40,12 @@ class DailyRecord(BaseModel):
     ati: float | None = None                    # acute training index
     cti: float | None = None                    # chronic training index
     performance: int | None = None              # performance index (-1 = no data)
+    training_load_ratio_state: int | None = None  # 1=下滑 2=恢复/竞技 3=维持 4=优化 5=过量
+    tired_rate_state: int | None = None           # 1=极度新鲜 2=新鲜 3=正常 4=疲劳 5=极度疲劳
+    t7d: float | None = None                    # 近7天总训练负荷
+    t28d: float | None = None                   # 近28天总训练负荷
+    recommend_tl_min: float | None = None       # COROS 建议训练负荷下限
+    recommend_tl_max: float | None = None       # COROS 建议训练负荷上限
     distance: float | None = None               # daily distance (m)
     duration: int | None = None                 # daily duration (s)
     vo2max: int | None = None                   # only from /analyse/query

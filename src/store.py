@@ -1,9 +1,10 @@
 """
 SQLite-backed store for deduplication and raw response logging.
 
-Two tables:
-- ProcessedActivity: tracks which activity IDs have already been pushed
-- RunLog: raw API responses, useful for debugging when COROS changes their API
+Three tables:
+- ProcessedActivity: one row per activity ID (individual COROS labelId), used for dedupe
+- RunLog: one row per training session (keyed by first activity's labelId), stores coaching result
+- MorningLog: one row per sleep date, stores morning broadcast result
 """
 import json
 from datetime import datetime, timezone
@@ -31,10 +32,14 @@ class ProcessedActivity(Base):
     processed_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
-class MorningReportLog(Base):
-    __tablename__ = "morning_report_logs"
+class MorningLog(Base):
+    __tablename__ = "morning_logs"
 
-    date = Column(String, primary_key=True)  # yyyyMMdd
+    sleep_date = Column(String, primary_key=True)  # yyyyMMdd，睡眠所属日期
+    raw_sleep = Column(Text)
+    raw_hrv = Column(Text)
+    raw_daily = Column(Text)
+    report = Column(Text)
     sent_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
@@ -71,14 +76,20 @@ def mark_processed(label_id: str):
         session.commit()
 
 
-def is_morning_report_sent(date: str) -> bool:
+def is_morning_report_sent(sleep_date: str) -> bool:
     with Session(engine) as session:
-        return session.get(MorningReportLog, date) is not None
+        return session.get(MorningLog, sleep_date) is not None
 
 
-def mark_morning_report_sent(date: str):
+def mark_morning_report_sent(sleep_date: str, sleep: dict, hrv: dict, daily: list, report: str):
     with Session(engine) as session:
-        session.merge(MorningReportLog(date=date))
+        session.merge(MorningLog(
+            sleep_date=sleep_date,
+            raw_sleep=json.dumps(sleep, ensure_ascii=False),
+            raw_hrv=json.dumps(hrv, ensure_ascii=False),
+            raw_daily=json.dumps(daily, ensure_ascii=False),
+            report=report,
+        ))
         session.commit()
 
 

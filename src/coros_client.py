@@ -23,6 +23,7 @@ from coros_lib.coros_api import (
     fetch_sleep,
     get_stored_auth,
     try_auto_login,
+    _is_token_valid,
 )
 from src.config import settings
 
@@ -36,9 +37,9 @@ def _date_str(d: date) -> str:
 
 
 def _get_auth():
-    """Return valid auth, auto-logging in if needed."""
+    """Return valid auth, auto-logging in if token is missing or expired."""
     auth = get_stored_auth()
-    if auth:
+    if auth and _is_token_valid(auth):
         return auth
     auth = asyncio.run(try_auto_login())
     if not auth:

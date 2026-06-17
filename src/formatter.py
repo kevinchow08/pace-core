@@ -10,12 +10,13 @@ COROS unit conventions (reverse-engineered from API responses):
 - heart rate, cadence: already correct units
 
 trainType enum (verified against COROS app Training Focus):
-- 2: Easy（轻松跑） ✓ inferred
-- 3: Base（有氧基础） ✓ inferred (20km LSD, app didn't display label)
-- 4: Threshold（阈值）✓ inferred
-- 5: VO2 Max ✓ confirmed
-- 6: Anaerobic（无氧）✓ confirmed
-- 0, 1: unknown, fallback to generic labels
+- 0: 热身/冷身（load极低）
+- 1: Easy（轻松跑）✓ verified 2026-06-14
+- 2: Base（有氧基础跑）✓ verified 2026-06-13
+- 3: Tempo（节奏跑）— inferred, not seen in 40-day sample
+- 4: Threshold（阈值跑）✓ verified 2026-05-13
+- 5: VO2 Max ✓ verified 2026-05-27
+- 6: Anaerobic（无氧/间歇）✓ verified 2026-06-10
 """
 
 _HR_ZONE_NAMES = [
@@ -28,13 +29,13 @@ _HR_ZONE_NAMES = [
 ]
 
 _TRAIN_TYPE_NAMES = {
-    0: "热身／基础有氧",
-    1: "恢复跑",
-    2: "轻松跑",        # Easy — confirmed pattern (low load, near-zero anaerobic)
-    3: "有氧基础跑",    # Base — inferred (LSD long run, app didn't display label)
-    4: "阈值跑",        # Threshold — inferred (trainType=5 is VO2Max, 4 is next tier down)
-    5: "VO2max",        # VO2 Max — confirmed in COROS app
-    6: "无氧／间歇",   # Anaerobic — confirmed in COROS app
+    0: "热身／冷身",    # very low load, minimal training effect
+    1: "轻松跑",        # Easy — verified 2026-06-14
+    2: "有氧基础跑",    # Base — verified 2026-06-13
+    3: "节奏跑",        # Tempo — inferred (not seen in 40-day sample)
+    4: "阈值跑",        # Threshold — verified 2026-05-13
+    5: "VO2max",        # VO2 Max — verified 2026-05-27
+    6: "无氧／间歇",   # Anaerobic — verified 2026-06-10
 }
 
 
@@ -244,47 +245,115 @@ def format_morning_ctx(sleep: dict, hrv: dict, daily_records: list[dict]) -> str
         lines.append(f"状态：{hrv_status}")
 
     # --- Recent training load ---
-    if daily_records:
-        lines.append("\n【近7天训练负荷】")
-        lines.append("日期        负荷   疲劳   ATI  静息心率")
-        for r in daily_records[-7:]:
-            date_raw = r.get("date", "")
-            fmt_date = f"{date_raw[:4]}-{date_raw[4:6]}-{date_raw[6:]}" if len(date_raw) == 8 else date_raw
-            load = r.get("training_load") or 0
-            tired = r.get("tired_rate")
-            ati = r.get("ati") or "—"
-            rhr = r.get("rhr") or "—"
-            tired_str = f"{tired:+.0f}" if tired is not None else "—"
-            lines.append(f"{fmt_date}  {load:4d}   {tired_str:>5}  {ati:3}  {rhr}")
+    if not daily_records:
+        return "\n".join(lines)
+
+    # 一次反向遍历：同时取最新的训练状态、新鲜度、阈值配速
+    latest_tl_state = latest_tl_ratio = latest_tired_state = latest_ltsp = None
+    for r in reversed(daily_records):
+        if latest_tl_state is None and r.get("training_load_ratio_state") is not None:
+            latest_tl_state = r["training_load_ratio_state"]
+            latest_tl_ratio = r["training_load_ratio"]
+        if latest_tired_state is None and r.get("tired_rate_state") is not None:
+            latest_tired_state = r["tired_rate_state"]
+        if latest_ltsp is None and r.get("ltsp"):
+            latest_ltsp = r["ltsp"]
+        if all(v is not None for v in [latest_tl_state, latest_tired_state, latest_ltsp]):
+            break
+
+    # 当前状态摘要
+    if latest_tl_state is not None:
+        state_label = _TRAINING_LOAD_STATE.get(latest_tl_state, "未知")
+        tired_label = _TIRED_RATE_STATE.get(latest_tired_state, "未知") if latest_tired_state else None
+        status_line = f"训练状态：{state_label}（强度比值{latest_tl_ratio:.0%}）"
+        if tired_label:
+            status_line += f"  身体新鲜度：{tired_label}"
+        lines.append(f"\n【当前状态】{status_line}")
+
+    # 近7天逐日明细
+    lines.append("\n【近7天训练负荷】")
+    for r in daily_records[-7:]:
+        date_raw = r.get("date", "")
+        fmt_date = f"{date_raw[:4]}-{date_raw[4:6]}-{date_raw[6:]}" if len(date_raw) == 8 else date_raw
+        load = r.get("training_load") or 0
+        tired = r.get("tired_rate")
+        ati = r.get("ati")
+        cti = r.get("cti")
+        rhr = r.get("rhr")
+        tired_str = f"{tired:+.0f}" if tired is not None else "—"
+        ati_str = str(int(ati)) if ati is not None else "—"
+        cti_str = str(int(cti)) if cti is not None else "—"
+        rhr_str = str(rhr) if rhr is not None else "—"
+        lines.append(
+            f"{fmt_date}: 负荷{load}  疲劳{tired_str}  近期负荷{ati_str}  长期基线{cti_str}  静息心率{rhr_str}"
+        )
+
+    if latest_ltsp:
+        lines.append(f"\n阈值配速：{_pace(latest_ltsp)}")
+
+    # 本周建议训练负荷
+    latest_rec = next(
+        (r for r in reversed(daily_records) if r.get("recommend_tl_min") is not None),
+        None
+    )
+    if latest_rec:
+        rec_min = int(latest_rec["recommend_tl_min"])
+        rec_max = int(latest_rec["recommend_tl_max"])
+        t7d = int(latest_rec.get("t7d") or 0)
+        lines.append(f"本周建议训练负荷：{rec_min}-{rec_max}，当前已累计：{t7d}")
 
     return "\n".join(lines)
+
+
+_TRAINING_LOAD_STATE = {
+    1: "下滑",
+    2: "恢复/竞技",
+    3: "维持",
+    4: "优化",
+    5: "过量",
+}
+
+_TIRED_RATE_STATE = {
+    # App Recovery 4级：Fresh(90-100%) / Normal(70-89%) / Fatigued(20-69%) / Exhausted(0-19%)
+    # state=2 已验证对应 App "Fresh"；state=1 为更极端的新鲜（长时间未训练），App 未单独显示
+    1: "极度新鲜",   # Fresh 极端情况，长时间停训
+    2: "新鲜",       # Fresh ✅ verified
+    3: "正常",       # Normal
+    4: "疲劳",       # Fatigued
+    5: "精疲力竭",   # Exhausted
+}
 
 
 def format_daily_ctx(records: list[dict]) -> str:
     if not records:
         return "（无近期训练数据）"
 
-    lines = ["日期        负荷   疲劳   ATI  CTI  表现"]
+    lines = []
 
     latest_lthr = None
     latest_ltsp = None
     latest_vo2 = None
-
-    perf_map = {-1: "休息", 0: "中等", 1: "良好", 2: "优秀", 3: "出色", 4: "极佳"}
 
     for r in records:
         date = r.get("date", "")
         fmt_date = f"{date[:4]}-{date[4:6]}-{date[6:]}" if len(date) == 8 else date
         load = r.get("training_load") or 0
         tired = r.get("tired_rate")
-        ati = r.get("ati") or "—"
-        cti = r.get("cti") or "—"
+        ati = r.get("ati")
+        cti = r.get("cti")
         perf = r.get("performance")
 
         tired_str = f"{tired:+.0f}" if tired is not None else "—"
-        perf_str = perf_map.get(perf, "—") if perf is not None else "—"
+        ati_str = str(int(ati)) if ati is not None else "—"
+        cti_str = str(int(cti)) if cti is not None else "—"
+        tl_state = r.get("training_load_ratio_state")
+        status_str = _TRAINING_LOAD_STATE.get(tl_state, "—") if tl_state is not None else "—"
+        tired_s = r.get("tired_rate_state")
+        fresh_str = _TIRED_RATE_STATE.get(tired_s, "—") if tired_s is not None else "—"
 
-        lines.append(f"{fmt_date}  {load:4d}   {tired_str:>5}  {ati:3}  {cti:3}  {perf_str}")
+        lines.append(
+            f"{fmt_date}: 负荷{load}  疲劳{tired_str}  近期负荷{ati_str}  长期基线{cti_str}  训练状态{status_str}  新鲜度{fresh_str}"
+        )
 
         if r.get("lthr"):
             latest_lthr = r["lthr"]

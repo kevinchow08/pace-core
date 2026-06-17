@@ -58,7 +58,7 @@ def _group_into_sessions(activities: list) -> list[list]:
 def on_new_activity() -> None:
     try:
         # days=2：覆盖数据同步延迟，同时避免拉太多历史数据
-        activities = coros_client.get_recent_activities(days=2)
+        activities = coros_client.get_recent_activities(days=4)
 
         # 过滤：只保留含有至少一条未处理活动的训练课
         sessions = _group_into_sessions(activities)
@@ -145,7 +145,7 @@ def morning_report() -> None:
 
         report = analyzer.analyze_morning(sleep_dict, hrv_dict, daily_dicts)
 
-        store.mark_morning_report_sent(sleep_date)
+        store.mark_morning_report_sent(sleep_date, sleep_dict, hrv_dict, daily_dicts, report)  # sleep_date = yyyyMMdd
         notifier.push(title="今日状态播报", body=report)
         logger.info("morning_report: pushed for %s", sleep_date)
 
