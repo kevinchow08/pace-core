@@ -47,6 +47,11 @@ def _get_auth():
     return auth
 
 
+def _is_auth_error(e: Exception) -> bool:
+    msg = str(e).lower()
+    return "token" in msg and ("invalid" in msg or "expired" in msg)
+
+
 def _with_retry(fn, *args, **kwargs) -> Any:
     for attempt in range(_MAX_RETRIES):
         try:
@@ -54,9 +59,13 @@ def _with_retry(fn, *args, **kwargs) -> Any:
         except Exception as e:
             if attempt == _MAX_RETRIES - 1:
                 raise
-            wait = 2 ** attempt
-            logger.warning(f"Attempt {attempt + 1} failed, retrying in {wait}s: {e}")
-            time.sleep(wait)
+            if _is_auth_error(e):
+                logger.warning("Auth token invalid, forcing re-login before retry...")
+                asyncio.run(try_auto_login())
+            else:
+                wait = 2 ** attempt
+                logger.warning(f"Attempt {attempt + 1} failed, retrying in {wait}s: {e}")
+                time.sleep(wait)
 
 
 # ---------------------------------------------------------------------------

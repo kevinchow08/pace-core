@@ -7,6 +7,7 @@ COROS unit conventions (reverse-engineered from API responses):
 - pace fields: seconds per km  → format as M:SS/km directly
 - HR zones:    seconds         (already correct, no conversion needed)
 - weather.temperature: ÷10   → °C
+- weather.humidity:    ÷10   → %  (verified: raw=760 → 76.0%)
 - heart rate, cadence: already correct units
 
 trainType enum (verified against COROS app Training Focus):
