@@ -332,6 +332,7 @@ def _parse_daily_record(item: dict) -> DailyRecord:
         date=str(item.get("happenDay", "")),
         avg_sleep_hrv=item.get("avgSleepHrv"),
         baseline=item.get("sleepHrvBase"),
+        standard_deviation=item.get("sleepHrvSd"),
         interval_list=item.get("sleepHrvIntervalList"),
         rhr=item.get("rhr"),
         training_load=item.get("trainingLoad"),
