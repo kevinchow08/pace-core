@@ -51,8 +51,8 @@ class DailyRecord(BaseModel):
     vo2max: int | None = None                   # only from /analyse/query
     lthr: int | None = None                     # lactate threshold HR (bpm)
     ltsp: int | None = None                     # lactate threshold pace (s/km)
-    stamina_level: float | None = None          # base fitness
-    stamina_level_7d: float | None = None       # 7-day fitness trend
+    stamina_level: float | None = None          # running fitness score (App "Running Fitness", e.g. 83.5); NOT cti (cti = Base Fitness)
+    stamina_level_7d: float | None = None       # 7-day running fitness trend
 
 
 class ActivitySummary(BaseModel):
