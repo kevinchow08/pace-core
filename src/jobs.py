@@ -1,12 +1,15 @@
 """
 Scheduler jobs.
 
-on_new_activity(): active (v0) — polls for new workouts, triggers analysis + push
-morning_report():  stubbed (v0.1) — activated after sleep data is available
+on_new_activity():    active — polls for new workouts, triggers analysis + push
+morning_report():     active — daily morning broadcast (sleep + HRV + load)
+injury_risk_check():  active — daily risk check, only pushes when ≥2 signals triggered
 """
 import logging
+from datetime import date
 
 from src import coros_client, analyzer, notifier, store
+from src.risk import assess_injury_risk
 
 logger = logging.getLogger(__name__)
 
@@ -152,3 +155,35 @@ def morning_report() -> None:
     except Exception as e:
         logger.error("morning_report job failed: %s", e)
         notifier.push(title="PaceCoach Error", body=f"晨报生成失败：{e}")
+
+
+def injury_risk_check() -> None:
+    """
+    每日伤病风险检测。拉取近14天数据，评估风险信号。
+    有风险（≥2个信号）才推送，同一天不重复推。
+    """
+    try:
+        check_date = date.today().strftime("%Y%m%d")
+
+        if store.is_risk_sent(check_date):
+            logger.info("injury_risk_check: already checked for %s, skipping", check_date)
+            return
+
+        daily_ctx = coros_client.get_recent_daily_records(days=14)
+        daily_dicts = [r.model_dump() for r in daily_ctx]
+
+        signals = assess_injury_risk(daily_dicts)
+        if signals is None:
+            logger.info("injury_risk_check: no risk detected for %s", check_date)
+            return
+
+        logger.info("injury_risk_check: risk detected, signals=%s", signals)
+        report = analyzer.analyze_risk(signals, daily_dicts)
+
+        store.mark_risk_sent(check_date, signals, report)
+        notifier.push(title="⚠️ 伤病风险预警", body=report)
+        logger.info("injury_risk_check: pushed for %s", check_date)
+
+    except Exception as e:
+        logger.error("injury_risk_check job failed: %s", e)
+        notifier.push(title="PaceCoach Error", body=f"风险检测失败：{e}")

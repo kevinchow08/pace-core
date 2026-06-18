@@ -95,7 +95,7 @@ def analyze_workout(activities: list[dict] | dict, daily_ctx: list[dict]) -> str
     )
     response = _client.chat.completions.create(
         model=settings.llm_model,
-        max_tokens=512,
+        max_tokens=1024,
         messages=[
             {"role": "system", "content": _WORKOUT_SYSTEM},
             {"role": "user", "content": prompt},
@@ -169,7 +169,7 @@ def analyze_morning(sleep: dict, hrv: dict, daily_records: list[dict]) -> str:
     logger.info("Calling LLM for morning report, model=%s", settings.llm_model)
     response = _client.chat.completions.create(
         model=settings.llm_model,
-        max_tokens=400,
+        max_tokens=768,
         messages=[
             {"role": "system", "content": _MORNING_SYSTEM},
             {"role": "user", "content": prompt},
@@ -177,6 +177,45 @@ def analyze_morning(sleep: dict, hrv: dict, daily_records: list[dict]) -> str:
     )
     result = response.choices[0].message.content or ""
     logger.info("Morning report result: %s", result[:200])
+    return result
+
+
+_RISK_SYSTEM = """你是一位专业跑步教练，根据运动员当前身体状态给出伤病风险预警。
+
+语气：关切但不夸张，重点给出具体可执行的建议，不要吓到运动员。
+
+【输出要求】
+- 第一句话点明当前存在的风险组合（用口语，不要列字段名）
+- 解释为什么这个组合值得警惕（结合运动科学，不超过2句）
+- 给出今明两天的具体建议（强度、类型、时长）
+- 结尾一句鼓励
+- 不超过400字
+- 不要使用 Z1/Z2 等代号，用中文术语"""
+
+
+def analyze_risk(signals: list[str], daily_records: list[dict]) -> str:
+    signals_text = "\n".join(f"- {s}" for s in signals)
+    daily_section = format_daily_ctx(daily_records)
+
+    prompt = f"""当前触发的风险信号：
+{signals_text}
+
+近期训练数据：
+{daily_section}
+
+请给出伤病风险预警。"""
+
+    logger.info("Calling LLM for risk analysis, signals=%s", signals)
+    response = _client.chat.completions.create(
+        model=settings.llm_model,
+        max_tokens=512,
+        messages=[
+            {"role": "system", "content": _RISK_SYSTEM},
+            {"role": "user", "content": prompt},
+        ],
+    )
+    result = response.choices[0].message.content or ""
+    logger.info("Risk analysis result: %s", result[:200])
     return result
 
 

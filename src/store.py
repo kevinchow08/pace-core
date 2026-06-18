@@ -43,6 +43,15 @@ class MorningLog(Base):
     sent_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
+class RiskLog(Base):
+    __tablename__ = "risk_logs"
+
+    check_date = Column(String, primary_key=True)  # yyyyMMdd，检测日期，同一天只推一次
+    signals = Column(Text)   # 触发的风险信号（JSON 列表）
+    report = Column(Text)    # LLM 生成的预警内容
+    sent_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
 class RunLog(Base):
     __tablename__ = "run_logs"
 
@@ -83,11 +92,28 @@ def is_morning_report_sent(sleep_date: str) -> bool:
 
 def mark_morning_report_sent(sleep_date: str, sleep: dict, hrv: dict, daily: list, report: str):
     with Session(engine) as session:
+        # merge()：主键存在则覆盖，不存在则插入；重跑时安全覆盖旧记录
         session.merge(MorningLog(
             sleep_date=sleep_date,
             raw_sleep=json.dumps(sleep, ensure_ascii=False),
             raw_hrv=json.dumps(hrv, ensure_ascii=False),
             raw_daily=json.dumps(daily, ensure_ascii=False),
+            report=report,
+        ))
+        session.commit()
+
+
+def is_risk_sent(check_date: str) -> bool:
+    with Session(engine) as session:
+        return session.get(RiskLog, check_date) is not None
+
+
+def mark_risk_sent(check_date: str, signals: list, report: str):
+    with Session(engine) as session:
+        # merge()：主键存在则覆盖，不存在则插入；重跑时安全覆盖旧记录
+        session.merge(RiskLog(
+            check_date=check_date,
+            signals=json.dumps(signals, ensure_ascii=False),
             report=report,
         ))
         session.commit()
