@@ -1,10 +1,12 @@
 """
 SQLite-backed store for deduplication and raw response logging.
 
-Three tables:
+Tables:
 - ProcessedActivity: one row per activity ID (individual COROS labelId), used for dedupe
 - RunLog: one row per training session (keyed by first activity's labelId), stores coaching result
 - MorningLog: one row per sleep date, stores morning broadcast result
+- RiskLog: one row per check date, stores injury risk warning
+- WeeklyLog: one row per week (keyed by week start date), stores weekly report
 """
 import json
 from datetime import datetime, timezone
@@ -49,6 +51,16 @@ class RiskLog(Base):
     check_date = Column(String, primary_key=True)  # yyyyMMdd，检测日期，同一天只推一次
     signals = Column(Text)   # 触发的风险信号（JSON 列表）
     report = Column(Text)    # LLM 生成的预警内容
+    sent_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class WeeklyLog(Base):
+    __tablename__ = "weekly_logs"
+
+    week_start = Column(String, primary_key=True)  # yyyyMMdd，本周周一日期
+    raw_daily = Column(Text)
+    raw_sessions = Column(Text)  # 本周活动摘要（含天气）JSON 列表
+    report = Column(Text)
     sent_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
@@ -117,6 +129,24 @@ def mark_risk_sent(check_date: str, signals: list, report: str):
             report=report,
         ))
         session.commit()
+
+
+def is_weekly_report_sent(week_start: str) -> bool:
+    with Session(engine) as session:
+        return session.get(WeeklyLog, week_start) is not None
+
+
+def mark_weekly_report_sent(week_start: str, daily: list, sessions: list, report: str):
+    with Session(engine) as session:
+        # merge()：主键存在则覆盖，不存在则插入；重跑时安全覆盖旧记录
+        session.merge(WeeklyLog(
+            week_start=week_start,
+            raw_daily=json.dumps(daily, ensure_ascii=False),
+            raw_sessions=json.dumps(sessions, ensure_ascii=False),
+            report=report,
+        ))
+        session.commit()
+
 
 
 def save_run_log(label_id: str, activity: dict, daily: dict, coaching: str):

@@ -7,6 +7,7 @@ Normal mode:   python main.py
 One-shot mode: python main.py --once      运行练后分析
                python main.py --morning   运行晨报
                python main.py --risk      运行伤病风险检测
+               python main.py --weekly    运行周报（上周数据）
 """
 import sys
 import logging
@@ -19,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 from src import store
 from src.config import settings
-from src.jobs import on_new_activity, morning_report, injury_risk_check
+from src.jobs import on_new_activity, morning_report, injury_risk_check, weekly_report
 
 
 def main():
@@ -38,6 +39,11 @@ def main():
     if "--risk" in sys.argv:
         logger.info("--risk mode: running injury_risk_check and exiting")
         injury_risk_check()
+        return
+
+    if "--weekly" in sys.argv:
+        logger.info("--weekly mode: running weekly_report and exiting")
+        weekly_report()
         return
 
     from apscheduler.schedulers.blocking import BlockingScheduler
@@ -60,6 +66,15 @@ def main():
         trigger="interval",
         minutes=settings.poll_interval_minutes,
         id="injury_risk_check",
+    )
+    # 周报：每周一早上8点触发（day_of_week=0 = 周一）
+    scheduler.add_job(
+        weekly_report,
+        trigger="cron",
+        day_of_week=0,
+        hour=8,
+        minute=0,
+        id="weekly_report",
     )
 
     logger.info(f"Scheduler started. Polling every {settings.poll_interval_minutes} minutes.")

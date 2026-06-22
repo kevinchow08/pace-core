@@ -4,9 +4,10 @@ Scheduler jobs.
 on_new_activity():    active — polls for new workouts, triggers analysis + push
 morning_report():     active — daily morning broadcast (sleep + HRV + load)
 injury_risk_check():  active — daily risk check, only pushes when ≥2 signals triggered
+weekly_report():      active — Monday morning weekly summary
 """
 import logging
-from datetime import date
+from datetime import date, timedelta
 
 from src import coros_client, analyzer, notifier, store
 from src.risk import assess_injury_risk
@@ -187,3 +188,57 @@ def injury_risk_check() -> None:
     except Exception as e:
         logger.error("injury_risk_check job failed: %s", e)
         notifier.push(title="PaceCoach Error", body=f"风险检测失败：{e}")
+
+
+def weekly_report() -> None:
+    """
+    每周一推送上周训练周报。
+    数据来源：
+    - get_recent_daily_records(start_date, end_date)：上周一到周日身体状态
+    - get_recent_activities(start_date, end_date) + get_activity_detail()：直接从 COROS API 拉，
+      不依赖 run_logs（避免因后端未及时轮询导致数据缺失）
+    同一周不重复推。
+    """
+    try:
+        today = date.today()
+        # 找本周周一，再往前7天 = 上周周一，无论周几触发结果都一样
+        this_monday = today - timedelta(days=today.weekday())
+        week_start_dt = this_monday - timedelta(days=7)
+        week_start = week_start_dt.strftime("%Y%m%d")
+
+        if store.is_weekly_report_sent(week_start):
+            logger.info("weekly_report: already sent for week %s, skipping", week_start)
+            return
+
+        week_end_dt = this_monday - timedelta(days=1)  # 上周周日
+
+        daily_ctx = coros_client.get_recent_daily_records(start_date=week_start_dt, end_date=week_end_dt)
+        daily_dicts = [r.model_dump() for r in daily_ctx]
+
+        activities = coros_client.get_recent_activities(start_date=week_start_dt, end_date=week_end_dt)
+        sessions = []
+        for act in activities:
+            detail = coros_client.get_activity_detail(act.activity_id, act.sport_type or 0)
+            s = detail.get("summary", {})
+            weather = detail.get("weather", {})
+            temp_raw = weather.get("temperature")
+            hum_raw = weather.get("humidity")
+            sessions.append({
+                "train_type": s.get("trainType"),
+                "distance_km": round(s.get("distance", 0) / 100000, 2),
+                "training_load": s.get("trainingLoad", 0),
+                "aerobic_effect": s.get("aerobicEffect"),
+                "temp": round(temp_raw / 10, 1) if temp_raw else None,
+                "humidity": round(hum_raw / 10, 1) if hum_raw else None,
+            })
+
+        logger.info("weekly_report: week=%s, sessions=%d", week_start, len(sessions))
+        report = analyzer.analyze_weekly(daily_dicts, sessions, week_start)
+
+        store.mark_weekly_report_sent(week_start, daily_dicts, sessions, report)
+        notifier.push(title="📊 本周训练周报", body=report)
+        logger.info("weekly_report: pushed for week %s", week_start)
+
+    except Exception as e:
+        logger.error("weekly_report job failed: %s", e)
+        notifier.push(title="PaceCoach Error", body=f"周报生成失败：{e}")

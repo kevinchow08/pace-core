@@ -9,7 +9,7 @@ import logging
 from openai import OpenAI
 
 from src.config import settings
-from src.formatter import format_activity, format_daily_ctx, format_morning_ctx
+from src.formatter import format_activity, format_daily_ctx, format_morning_ctx, format_weekly_ctx
 
 logger = logging.getLogger(__name__)
 
@@ -216,6 +216,44 @@ def analyze_risk(signals: list[str], daily_records: list[dict]) -> str:
     )
     result = response.choices[0].message.content or ""
     logger.info("Risk analysis result: %s", result[:200])
+    return result
+
+
+_WEEKLY_SYSTEM = """你是一位专业跑步教练，每周一根据运动员上周的训练数据给出一份训练周报。
+
+【周报目标】
+帮助运动员回顾本周训练质量、身体状态趋势，以及下周训练方向建议。
+
+【输出结构】
+1. 本周总结（一句话定性：完成度 + 整体强度）
+2. 训练亮点 or 需要注意的点（2-3条，结合具体数据，不要逐条复述字段）
+3. 身体状态回顾（HRV、疲劳、静息心率趋势，结合运动科学解读）
+4. 下周建议（明确强度方向、建议训练类型和次数）
+5. 一句鼓励收尾
+
+【要求】
+- 不超过600字
+- 不要使用 Z1/Z2 等代号，用中文术语（恢复跑、有氧跑、节奏跑、间歇等）
+- 不要直接引用字段名称，用口语化表达
+- 天气数据可作为背景说明训练条件，不要过度展开"""
+
+
+def analyze_weekly(daily_records: list[dict], sessions: list[dict], week_start: str) -> str:
+    ctx = format_weekly_ctx(daily_records, sessions, week_start)
+    prompt = f"{ctx}\n\n请给出本周训练周报。"
+
+    logger.info("Weekly report context:\n%s", ctx)
+    logger.info("Calling LLM for weekly report, model=%s", settings.llm_model)
+    response = _client.chat.completions.create(
+        model=settings.llm_model,
+        max_tokens=768,
+        messages=[
+            {"role": "system", "content": _WEEKLY_SYSTEM},
+            {"role": "user", "content": prompt},
+        ],
+    )
+    result = response.choices[0].message.content or ""
+    logger.info("Weekly report result: %s", result[:200])
     return result
 
 

@@ -72,12 +72,12 @@ def _with_retry(fn, *args, **kwargs) -> Any:
 # Public tool-shaped functions
 # ---------------------------------------------------------------------------
 
-def get_recent_activities(days: int = 7) -> list:
-    """Fetch activities from the last N days."""
+def get_recent_activities(days: int = 7, *, start_date: date | None = None, end_date: date | None = None) -> list:
+    """Fetch activities. Pass start_date/end_date for explicit range, or days for rolling window."""
     def _call():
         auth = _get_auth()
-        end = date.today()
-        start = end - timedelta(days=days)
+        end = end_date or date.today()
+        start = start_date or (end - timedelta(days=days))
         activities, _ = asyncio.run(
             fetch_activities(auth, _date_str(start), _date_str(end))
         )
@@ -95,12 +95,12 @@ def get_activity_detail(activity_id: str, sport_type: int) -> dict:
     return _with_retry(_call)
 
 
-def get_recent_daily_records(days: int = 14) -> list:
-    """Fetch daily metrics (HRV, load, VO2max, etc.) for the last N days."""
+def get_recent_daily_records(days: int = 14, *, start_date: date | None = None, end_date: date | None = None) -> list:
+    """Fetch daily metrics (HRV, load, VO2max, etc.). Pass start_date/end_date for explicit range, or days for rolling window."""
     def _call():
         auth = _get_auth()
-        end = date.today()
-        start = end - timedelta(days=days)
+        end = end_date or date.today()
+        start = start_date or (end - timedelta(days=days))
         return asyncio.run(
             fetch_daily_records(auth, _date_str(start), _date_str(end))
         )

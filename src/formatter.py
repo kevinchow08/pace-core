@@ -389,3 +389,75 @@ def format_morning_ctx(sleep: dict, hrv: dict, daily_records: list[dict]) -> str
         lines.append(f"本周建议训练负荷：{rec_min}-{rec_max}，当前已累计：{t7d}")
 
     return "\n".join(lines)
+
+
+# ── 6. format_weekly_ctx ─────────────────────────────────────────────────
+# 周报背景 → 供周报 LLM 使用
+# sessions 来自 coros_client.get_recent_activities，包含训练类型、距离、负荷、天气
+# daily_records 来自 get_recent_daily_records(days=7)
+# 新增周报字段：在对应 section 中添加
+
+def format_weekly_ctx(daily_records: list[dict], sessions: list[dict], week_start: str) -> str:
+    """
+    daily_records: 本周7天 DailyRecord dicts，按日期正序。
+    sessions: 本周各活动摘要（train_type, distance_km, training_load, temp, humidity）。
+    week_start: 本周周一日期 yyyyMMdd。
+    """
+    from datetime import datetime, timedelta
+    lines = []
+
+    # 周期标题
+    try:
+        start_dt = datetime.strptime(week_start, "%Y%m%d")
+        end_dt = start_dt + timedelta(days=6)
+        week_label = f"{start_dt.strftime('%m/%d')} - {end_dt.strftime('%m/%d')}"
+    except ValueError:
+        week_label = week_start
+    lines.append(f"【本周训练总结】（{week_label}）")
+
+    # --- 训练量汇总 ---
+    total_km = sum(s.get("distance_km", 0) for s in sessions)
+    total_load = sum(s.get("training_load", 0) for s in sessions)
+    session_count = len([s for s in sessions if s.get("train_type") != 0])  # 排除热身/冷身
+
+    lines.append(f"共 {session_count} 次训练  累计 {total_km:.1f} km  总负荷 {total_load}")
+
+    # 建议负荷范围
+    latest_rec = next(
+        (r for r in reversed(daily_records) if r.get("recommend_tl_min") is not None), None
+    )
+    if latest_rec:
+        rec_min = int(latest_rec["recommend_tl_min"])
+        rec_max = int(latest_rec["recommend_tl_max"])
+        lines.append(f"建议范围 {rec_min}-{rec_max}  {'✅ 达标' if total_load >= rec_min else '⬇️ 未达标' if total_load < rec_min else '⚠️ 超量'}")
+
+    # --- 训练类型分布 ---
+    type_counts: dict[str, int] = {}
+    for s in sessions:
+        label = _TRAIN_TYPE_NAMES.get(s.get("train_type"), "其他")
+        if label != "热身／冷身":
+            type_counts[label] = type_counts.get(label, 0) + 1
+    if type_counts:
+        type_str = "  ".join(f"{k}×{v}" for k, v in type_counts.items())
+        lines.append(f"训练类型：{type_str}")
+
+    # --- 天气汇总（仅训练日）---
+    temps = [s["temp"] for s in sessions if s.get("temp") is not None]
+    humidities = [s["humidity"] for s in sessions if s.get("humidity") is not None]
+    if temps:
+        avg_temp = sum(temps) / len(temps)
+        avg_hum = sum(humidities) / len(humidities) if humidities else None
+        weather_str = f"训练日平均气温：{avg_temp:.0f}°C"
+        if avg_hum:
+            weather_str += f"  平均湿度：{avg_hum:.0f}%"
+        lines.append(f"\n【训练日天气】\n{weather_str}")
+
+    # --- 能力摘要 ---
+    # HRV、疲劳、静息心率的趋势判断交给 LLM 来做
+    # daily_records 完整传入，模型自己有足够上下文，不需要在这里硬编码规则
+    ability_lines = _format_ability_summary(daily_records)
+    if ability_lines:
+        lines.append("")
+        lines.extend(ability_lines)
+
+    return "\n".join(lines)
