@@ -144,7 +144,9 @@ def format_activity(activity: dict) -> str:
     lines.append("  ".join(pace_parts))
 
     lines.append(f"均心率：{avg_hr} bpm  最高心率：{max_hr} bpm  平均步频：{avg_cadence} 步/分")
-    lines.append(f"训练负荷：{load}  有氧效果：{aerobic}  无氧效果：{anaerobic}")
+    efficiency = s.get("staminaLevel7d")
+    eff_str = f"  训练效率：{efficiency:.0f}%" if efficiency is not None else ""
+    lines.append(f"训练负荷：{load}  有氧效果：{aerobic}  无氧效果：{anaerobic}{eff_str}")
 
     extras = []
     if best_km:
@@ -207,9 +209,9 @@ def _format_ability_summary(records: list[dict]) -> list[str]:
     从 daily_records 中提取最新有效的能力指标，返回文本行列表。
     format_daily_ctx 和 format_morning_ctx 共用，新增能力字段只改这里。
     """
-    latest_lthr = latest_ltsp = latest_vo2 = latest_stamina = latest_stamina_7d = None
+    latest_lthr = latest_ltsp = latest_vo2 = latest_stamina = None
 
-    for r in records:
+    for r in reversed(records):
         if latest_lthr is None and r.get("lthr"):
             latest_lthr = r["lthr"]
         if latest_ltsp is None and r.get("ltsp"):
@@ -218,7 +220,8 @@ def _format_ability_summary(records: list[dict]) -> list[str]:
             latest_vo2 = r["vo2max"]
         if latest_stamina is None and r.get("stamina_level"):
             latest_stamina = r["stamina_level"]
-            latest_stamina_7d = r.get("stamina_level_7d")
+        if all(x is not None for x in [latest_lthr, latest_ltsp, latest_vo2, latest_stamina]):
+            break
 
     lines = []
     if latest_lthr:
@@ -228,8 +231,7 @@ def _format_ability_summary(records: list[dict]) -> list[str]:
     if latest_vo2:
         lines.append(f"VO2max：{latest_vo2}")
     if latest_stamina is not None:
-        trend_str = f"（近7天趋势：{latest_stamina_7d:+.1f}）" if latest_stamina_7d is not None else ""
-        lines.append(f"跑步能力评分：{latest_stamina:.1f}{trend_str}")
+        lines.append(f"跑步能力评分：{latest_stamina:.1f}")
     return lines
 
 

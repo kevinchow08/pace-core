@@ -30,10 +30,11 @@ class HRVRecord(BaseModel):
 
 class DailyRecord(BaseModel):
     date: str
-    avg_sleep_hrv: float | None = None
-    baseline: float | None = None
-    interval_list: list[int] | None = None
-    rhr: int | None = None                      # resting heart rate (bpm)
+    avg_sleep_hrv: float | None = None          # 夜间 HRV 均值 (ms)
+    baseline: float | None = None               # HRV 近30天基线
+    standard_deviation: float | None = None     # HRV 基线标准差（正常区间 = baseline ± sd）
+    interval_list: list[int] | None = None      # HRV 百分位区间
+    rhr: int | None = None                      # 静息心率 (bpm)
     training_load: int | None = None
     training_load_ratio: float | None = None    # acute/chronic ratio
     tired_rate: float | None = None
@@ -48,11 +49,12 @@ class DailyRecord(BaseModel):
     recommend_tl_max: float | None = None       # COROS 建议训练负荷上限
     distance: float | None = None               # daily distance (m)
     duration: int | None = None                 # daily duration (s)
-    vo2max: int | None = None                   # only from /analyse/query
-    lthr: int | None = None                     # lactate threshold HR (bpm)
-    ltsp: int | None = None                     # lactate threshold pace (s/km)
-    stamina_level: float | None = None          # running fitness score (App "Running Fitness", e.g. 83.5); NOT cti (cti = Base Fitness)
-    stamina_level_7d: float | None = None       # 7-day running fitness trend
+    # ── 以下字段只有训练日才有值，来自 /analyse/query 的 t7dayList ──
+    vo2max: int | None = None                   # 最大摄氧量，训练后更新
+    lthr: int | None = None                     # 乳酸阈值心率 (bpm)
+    ltsp: int | None = None                     # 乳酸阈值配速 (s/km)
+    stamina_level: float | None = None          # 跑步能力评分 (App "Running Fitness", e.g. 83.5)；≠ cti（cti = Base Fitness）
+    efficiency_score: float | None = None       # 训练效率评分 80-120% (App "Efficiency Score")，每次训练独有
 
 
 class ActivitySummary(BaseModel):

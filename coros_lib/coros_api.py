@@ -349,11 +349,8 @@ def _parse_daily_record(item: dict) -> DailyRecord:
         recommend_tl_max=item.get("recomendTlMax"),
         distance=item.get("distance"),
         duration=item.get("duration"),
-        vo2max=item.get("vo2max"),
-        lthr=item.get("lthr"),
-        ltsp=item.get("ltsp"),
-        stamina_level=item.get("staminaLevel"),
-        stamina_level_7d=item.get("staminaLevel7d"),
+        # vo2max / lthr / ltsp / stamina_level / efficiency_score 不从这里取
+        # dayList 不含这些字段，真正的值来自下方 /analyse/query 的 t7dayList merge（只有训练日才有）
     )
 
 
@@ -361,11 +358,18 @@ async def fetch_daily_records(
     auth: StoredAuth, start_day: str, end_day: str
 ) -> list[DailyRecord]:
     """
-    Fetch daily metrics (HRV, RHR, training load, VO2max, etc.) for a date range.
+    Fetch daily metrics for a date range. Merges two endpoints:
 
-    Merges data from two endpoints:
-    - /analyse/dayDetail/query: supports up to ~24 weeks
-    - /analyse/query: last ~28 days (fixed), adds VO2max / LTHR / stamina fields
+    1. /analyse/dayDetail/query（每日记录，支持最多~24周）
+       每天一条，包含：HRV、RHR、ATI/CTI、疲劳度、训练负荷等
+       → 所有日期都有（包括休息日）
+
+    2. /analyse/query（固定返回近28天，按训练日）
+       t7dayList 每条对应一次有训练的日期，包含：
+       - vo2max / lthr / ltsp：能力指标，训练后更新
+       - stamina_level：跑步能力评分（App "Running Fitness"），训练后更新
+       - efficiency_score：训练效率评分 80-120%（App "Efficiency Score"），每次训练独有
+       → 只有训练日才有，休息日对应字段为 null
     """
     headers = _auth_headers(auth)
     base = _base_url(auth.region)
@@ -406,7 +410,7 @@ async def fetch_daily_records(
                 if (v := item.get("staminaLevel")) is not None:
                     rec.stamina_level = v
                 if (v := item.get("staminaLevel7d")) is not None:
-                    rec.stamina_level_7d = v
+                    rec.efficiency_score = v
 
     return sorted(records_by_date.values(), key=lambda r: r.date)
 
