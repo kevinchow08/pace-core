@@ -6,8 +6,8 @@
   1. 训练过量：ratio_state=5 且 ATI 仍在上升（已开始下降则不触发）
               或近3天 ATI 增幅 > 20%
   2. 疲劳积累：tired_rate_state >= 4 且 tired_rate 未在好转（仍在上升或持平）
-  3. HRV 异常：近3天中 ≥ 2 天 avg_sleep_hrv < P25（interval_list[1]）
-              （COROS 不返回 sd，用 P25 分位数替代；单日偏低不触发）
+  3. HRV 异常：近3天中 ≥ 2 天 avg_sleep_hrv < baseline - sd
+              （sd 由 job 层从 HRVRecord 合并；无 sd 时降级用 interval_list P25）
 
 趋势判断的意义：高频训练运动员的高负荷/高疲劳是常态，危险的是趋势在恶化，
 而不是"数值高但稳定或已在恢复"。
@@ -68,22 +68,32 @@ def _check_fatigue(records: list[dict]) -> bool:
 def _check_hrv(records: list[dict]) -> bool:
     """
     HRV 异常信号。
-    需要近3天中至少 2 天 avg_sleep_hrv 低于 P25 分位数（interval_list[1]）。
+    近3天中至少 2 天 avg_sleep_hrv 低于正常区间下沿，触发信号。
 
-    COROS 不返回 sleepHrvSd，改用 interval_list = [P5, P25, P75, P95] 的 P25
-    作为"偏低"阈值——低于 P25 说明当天 HRV 处于个人历史的后四分之一，
-    连续 2 天如此说明恢复持续承压，排除单次训练后的一过性下降。
+    阈值优先级：
+    1. standard_deviation（由 job 层从 HRVRecord 合并进来）→ baseline - sd（更准确）
+    2. interval_list[1]（P25，COROS 分位数）→ 降级方案
     """
     below_count = 0
     checked = 0
     for r in records[-3:]:
         avg = r.get("avg_sleep_hrv")
+        baseline = r.get("baseline")
+        sd = r.get("standard_deviation")
         interval_list = r.get("interval_list")
-        if avg is None or not interval_list or len(interval_list) < 2:
+
+        if avg is None:
             continue
-        p25 = interval_list[1]  # P25：25% 的天数 HRV 低于此值
+
+        if sd is not None and baseline is not None:
+            threshold = baseline - sd
+        elif interval_list and len(interval_list) >= 2:
+            threshold = interval_list[1]  # P25
+        else:
+            continue
+
         checked += 1
-        if avg < p25:
+        if avg < threshold:
             below_count += 1
 
     return checked >= 2 and below_count >= 2

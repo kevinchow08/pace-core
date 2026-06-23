@@ -173,6 +173,17 @@ def injury_risk_check() -> None:
         daily_ctx = coros_client.get_recent_daily_records(days=14)
         daily_dicts = [r.model_dump() for r in daily_ctx]
 
+        # 把 HRVRecord 的 standard_deviation 按日期合并进 daily_dicts
+        # DailyRecord 拿不到 sd，HRVRecord 才有（来自 /dashboard/query）
+        hrv_sd_by_date = {
+            r.date: r.standard_deviation
+            for r in coros_client.get_hrv()
+            if r.standard_deviation is not None
+        }
+        for d in daily_dicts:
+            if d["date"] in hrv_sd_by_date:
+                d["standard_deviation"] = hrv_sd_by_date[d["date"]]
+
         signals = assess_injury_risk(daily_dicts)
         if signals is None:
             logger.info("injury_risk_check: no risk detected for %s", check_date)

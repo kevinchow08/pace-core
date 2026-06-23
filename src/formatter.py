@@ -310,6 +310,7 @@ def format_morning_ctx(sleep: dict, hrv: dict, daily_records: list[dict]) -> str
         lines.append(f"睡眠均心率：{avg_hr} bpm")
 
     # --- HRV ---
+    # sd 来自 HRVRecord.standard_deviation（sleepHrvSd），sleepHrvList 每条都有值
     avg_hrv = hrv.get("avg_sleep_hrv")
     baseline = hrv.get("baseline")
     sd = hrv.get("standard_deviation")
