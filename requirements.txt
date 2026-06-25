@@ -10,3 +10,4 @@ tzlocal
 openai
 fastapi[standard]
 uvicorn
+asyncpg

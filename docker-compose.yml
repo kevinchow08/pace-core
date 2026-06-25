@@ -1,0 +1,24 @@
+services:
+  postgres:
+    image: postgres:16-alpine # 直接用官方镜像，不需要自己写 Dockerfile
+    env_file: .env # POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB 从 .env 注入
+    volumes:
+      # 把容器内 pg 的数据目录"穿透"挂到 Docker 管理的命名卷
+      # 绕过容器隔离，容器删了重建，数据依然在卷里
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pacecoach"] # pg 自带探针，确认数据库真正就绪
+      interval: 5s # 每 5 秒检查一次
+      retries: 5 # 失败 5 次才认定不健康
+
+  backend:
+    build: . # 用当前目录的 Dockerfile 构建镜像
+    ports:
+      - "8000:8000" # 宿主机 8000 → 容器内 8000
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy # 等 pg 健康检查通过才启动，避免连不上 db 报错
+
+volumes:
+  postgres_data: # 声明命名卷，由 Docker 统一管理，不需要指定宿主机路径

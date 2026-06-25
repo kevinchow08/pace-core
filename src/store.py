@@ -1,36 +1,38 @@
 """
-SQLite-backed store for deduplication and raw response logging.
+Postgres-backed store，负责去重和原始响应落库。
 
 Tables:
-- ProcessedActivity: one row per activity ID (individual COROS labelId), used for dedupe
-- RunLog: one row per training session (keyed by first activity's labelId), stores coaching result
-- MorningLog: one row per sleep date, stores morning broadcast result
-- RiskLog: one row per check date, stores injury risk warning
-- WeeklyLog: one row per week (keyed by week start date), stores weekly report
+- ProcessedActivity: 每条活动 ID 一行（COROS labelId），用于去重
+- RunLog: 每次训练课一行（以第一条活动 ID 为 key），存教练点评
+- MorningLog: 每个睡眠日期一行，存晨报结果
+- RiskLog: 每个检测日期一行，存伤病风险预警
+- WeeklyLog: 每周一行（以周一日期为 key），存周报结果
 """
 import json
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, String, Text, create_engine
-from sqlalchemy.orm import DeclarativeBase, Session
+from sqlalchemy import Column, DateTime, String, Text
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.orm import DeclarativeBase
 
 from src.config import settings
 
-
-engine = create_engine(settings.db_url)
+# asyncpg 驱动要求连接串格式为 postgresql+asyncpg://
+# .env 中直接写这个格式，不在代码层做转换
+engine = create_async_engine(settings.db_url)
 
 
 class Base(DeclarativeBase):
-    # SQLAlchemy reads ORM models from this base class and its metadata.
+    # SQLAlchemy 从这个 Base 的 metadata 中读取所有 ORM 模型，用于建表
     pass
 
 
 class ProcessedActivity(Base):
     __tablename__ = "processed_activities"
 
-    # COROS labelId is the natural primary key for dedupe.
+    # COROS labelId 是天然的去重主键
     label_id = Column(String, primary_key=True)
-    # Filled when the row is created; used for auditing when we marked it processed.
+    # 记录何时标记为已处理，便于审计
     processed_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
@@ -67,97 +69,95 @@ class WeeklyLog(Base):
 class RunLog(Base):
     __tablename__ = "run_logs"
 
-    # Reuse labelId as the row identity so repeated writes can overwrite the same row.
+    # 复用 labelId 作为行标识，重复写入时可覆盖同一行
     id = Column(String, primary_key=True)  # label_id
-    # Store raw payloads as JSON text for debugging and replay.
+    # 原始数据存 JSON 文本，便于调试和回放
     raw_activity = Column(Text)
     raw_daily = Column(Text)
     coaching = Column(Text)
-    # Lets us inspect when the log row was written.
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
-def init_db():
-    # Create tables that do not exist yet from the ORM metadata.
-    # This is a bootstrap step, not a schema migration tool.
-    Base.metadata.create_all(engine)
+async def init_db():
+    # create_all 只建不存在的表，不会修改已有表结构
+    # 表结构变更需要 Alembic 迁移脚本管理（待补）
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
 
 
-def is_processed(label_id: str) -> bool:
-    # Each call opens a short-lived session, does one lookup, and closes it.
-    with Session(engine) as session:
-        return session.get(ProcessedActivity, label_id) is not None
+async def is_processed(label_id: str) -> bool:
+    # 每次调用开一个短生命周期 session，查完即关
+    async with AsyncSession(engine) as session:
+        return await session.get(ProcessedActivity, label_id) is not None
 
 
-def mark_processed(label_id: str):
+async def mark_processed(label_id: str):
     # add()：只能插入新记录，主键冲突直接报错（IntegrityError）
     # 语义是"这条记录必须是第一次写入"，比静默覆盖更严格，能暴露重复调用的 bug
-    with Session(engine) as session:
+    async with AsyncSession(engine) as session:
         session.add(ProcessedActivity(label_id=label_id))
-        session.commit()
+        await session.commit()
 
 
-def is_morning_report_sent(sleep_date: str) -> bool:
-    with Session(engine) as session:
-        return session.get(MorningLog, sleep_date) is not None
+async def is_morning_report_sent(sleep_date: str) -> bool:
+    async with AsyncSession(engine) as session:
+        return await session.get(MorningLog, sleep_date) is not None
 
 
-def mark_morning_report_sent(sleep_date: str, sleep: dict, hrv: dict, daily: list, report: str):
-    with Session(engine) as session:
+async def mark_morning_report_sent(sleep_date: str, sleep: dict, hrv: dict, daily: list, report: str):
+    async with AsyncSession(engine) as session:
         # merge()：主键存在则覆盖，不存在则插入；重跑时安全覆盖旧记录
-        session.merge(MorningLog(
+        await session.merge(MorningLog(
             sleep_date=sleep_date,
             raw_sleep=json.dumps(sleep, ensure_ascii=False),
             raw_hrv=json.dumps(hrv, ensure_ascii=False),
             raw_daily=json.dumps(daily, ensure_ascii=False),
             report=report,
         ))
-        session.commit()
+        await session.commit()
 
 
-def is_risk_sent(check_date: str) -> bool:
-    with Session(engine) as session:
-        return session.get(RiskLog, check_date) is not None
+async def is_risk_sent(check_date: str) -> bool:
+    async with AsyncSession(engine) as session:
+        return await session.get(RiskLog, check_date) is not None
 
 
-def mark_risk_sent(check_date: str, signals: list, report: str):
-    with Session(engine) as session:
+async def mark_risk_sent(check_date: str, signals: list, report: str):
+    async with AsyncSession(engine) as session:
         # merge()：主键存在则覆盖，不存在则插入；重跑时安全覆盖旧记录
-        session.merge(RiskLog(
+        await session.merge(RiskLog(
             check_date=check_date,
             signals=json.dumps(signals, ensure_ascii=False),
             report=report,
         ))
-        session.commit()
+        await session.commit()
 
 
-def is_weekly_report_sent(week_start: str) -> bool:
-    with Session(engine) as session:
-        return session.get(WeeklyLog, week_start) is not None
+async def is_weekly_report_sent(week_start: str) -> bool:
+    async with AsyncSession(engine) as session:
+        return await session.get(WeeklyLog, week_start) is not None
 
 
-def mark_weekly_report_sent(week_start: str, daily: list, sessions: list, report: str):
-    with Session(engine) as session:
+async def mark_weekly_report_sent(week_start: str, daily: list, sessions: list, report: str):
+    async with AsyncSession(engine) as session:
         # merge()：主键存在则覆盖，不存在则插入；重跑时安全覆盖旧记录
-        session.merge(WeeklyLog(
+        await session.merge(WeeklyLog(
             week_start=week_start,
             raw_daily=json.dumps(daily, ensure_ascii=False),
             raw_sessions=json.dumps(sessions, ensure_ascii=False),
             report=report,
         ))
-        session.commit()
+        await session.commit()
 
 
-
-def save_run_log(label_id: str, activity: dict, daily: dict, coaching: str):
-    # merge()：主键存在则更新，不存在则插入（upsert）
-    # 同一活动因失败重跑时需要覆盖旧记录，所以用 merge 而不是 add
-    with Session(engine) as session:
-        log = RunLog(
+async def save_run_log(label_id: str, activity: dict, daily: dict, coaching: str):
+    async with AsyncSession(engine) as session:
+        # merge()：主键存在则更新，不存在则插入（upsert）
+        # 同一活动因失败重跑时需要覆盖旧记录，所以用 merge 而不是 add
+        await session.merge(RunLog(
             id=label_id,
             raw_activity=json.dumps(activity, ensure_ascii=False),
             raw_daily=json.dumps(daily, ensure_ascii=False),
             coaching=coaching,
-        )
-        session.merge(log)
-        session.commit()
+        ))
+        await session.commit()

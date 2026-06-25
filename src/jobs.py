@@ -59,24 +59,26 @@ def _group_into_sessions(activities: list) -> list[list]:
     return sessions
 
 
-def on_new_activity() -> None:
+async def on_new_activity() -> None:
     try:
-        # days=2：覆盖数据同步延迟，同时避免拉太多历史数据
-        activities = coros_client.get_recent_activities(days=4)
+        # days=4：覆盖数据同步延迟，同时避免拉太多历史数据
+        activities = await coros_client.get_recent_activities(days=4)
 
         # 过滤：只保留含有至少一条未处理活动的训练课
         sessions = _group_into_sessions(activities)
-        new_sessions = [
-            s for s in sessions
-            if any(not store.is_processed(a.activity_id) for a in s)
-        ]
+        new_sessions = []
+        for s in sessions:
+            # any() 内部有 await，不能用列表推导式，必须显式 for 循环
+            has_new = any([not await store.is_processed(a.activity_id) for a in s])
+            if has_new:
+                new_sessions.append(s)
 
         logger.info(f"Found {len(new_sessions)} new session(s) to process")
 
         # 14天背景数据：所有课共用一份，在循环外拉一次
         # 理由：COROS 数据不会在同一次 job 的几秒内发生变化，
         # 多次调用结果相同，只会浪费 API 请求
-        daily_ctx = coros_client.get_recent_daily_records(days=14)
+        daily_ctx = await coros_client.get_recent_daily_records(days=14)
         daily_dicts = [r.model_dump() for r in daily_ctx]
 
         for session in new_sessions:
@@ -89,7 +91,7 @@ def on_new_activity() -> None:
                 # 拉本课所有活动的详情
                 details = []
                 for activity in session:
-                    detail = coros_client.get_activity_detail(
+                    detail = await coros_client.get_activity_detail(
                         activity.activity_id, activity.sport_type or 0
                     )
                     details.append(detail)
@@ -97,12 +99,12 @@ def on_new_activity() -> None:
                 # 整课一起分析，一条推送
                 coaching = analyzer.analyze_workout(details, daily_dicts)
 
-                store.save_run_log(session_id, details, daily_dicts, coaching)
+                await store.save_run_log(session_id, details, daily_dicts, coaching)
                 notifier.push(title="练后点评", body=coaching)
 
                 # 把本课所有活动都标记为已处理
                 for activity in session:
-                    store.mark_processed(activity.activity_id)
+                    await store.mark_processed(activity.activity_id)
 
                 logger.info(f"Pushed coaching for session {session_id} ({len(session)} activities)")
 
@@ -115,7 +117,7 @@ def on_new_activity() -> None:
         notifier.push(title="PaceCoach Error", body=f"轮询失败：{e}")
 
 
-def morning_report() -> None:
+async def morning_report() -> None:
     """
     今日状态播报。
 
@@ -123,7 +125,7 @@ def morning_report() -> None:
     不补发历史日期——历史播报对当天决策没有意义。
     """
     try:
-        sleep_records = coros_client.get_sleep(days=2)
+        sleep_records = await coros_client.get_sleep(days=2)
         if not sleep_records:
             logger.info("morning_report: no sleep data, skipping")
             return
@@ -131,17 +133,17 @@ def morning_report() -> None:
         sleep = sleep_records[-1]
         sleep_date = sleep.date if hasattr(sleep, "date") else sleep.get("date", "")
 
-        if store.is_morning_report_sent(sleep_date):
+        if await store.is_morning_report_sent(sleep_date):
             logger.info("morning_report: already sent for %s, skipping", sleep_date)
             return
 
-        hrv_records = coros_client.get_hrv()
+        hrv_records = await coros_client.get_hrv()
         hrv = next((h for h in reversed(hrv_records) if h.date == sleep_date), None)
         if not hrv:
             logger.info("morning_report: no HRV data for %s yet, skipping", sleep_date)
             return
 
-        daily_ctx = coros_client.get_recent_daily_records(days=7)
+        daily_ctx = await coros_client.get_recent_daily_records(days=7)
         daily_dicts = [r.model_dump() for r in daily_ctx]
 
         sleep_dict = sleep.model_dump() if hasattr(sleep, "model_dump") else sleep
@@ -149,7 +151,7 @@ def morning_report() -> None:
 
         report = analyzer.analyze_morning(sleep_dict, hrv_dict, daily_dicts)
 
-        store.mark_morning_report_sent(sleep_date, sleep_dict, hrv_dict, daily_dicts, report)  # sleep_date = yyyyMMdd
+        await store.mark_morning_report_sent(sleep_date, sleep_dict, hrv_dict, daily_dicts, report)
         notifier.push(title="今日状态播报", body=report)
         logger.info("morning_report: pushed for %s", sleep_date)
 
@@ -158,7 +160,7 @@ def morning_report() -> None:
         notifier.push(title="PaceCoach Error", body=f"晨报生成失败：{e}")
 
 
-def injury_risk_check() -> None:
+async def injury_risk_check() -> None:
     """
     每日伤病风险检测。拉取近14天数据，评估风险信号。
     有风险（≥2个信号）才推送，同一天不重复推。
@@ -166,18 +168,19 @@ def injury_risk_check() -> None:
     try:
         check_date = date.today().strftime("%Y%m%d")
 
-        if store.is_risk_sent(check_date):
+        if await store.is_risk_sent(check_date):
             logger.info("injury_risk_check: already checked for %s, skipping", check_date)
             return
 
-        daily_ctx = coros_client.get_recent_daily_records(days=14)
+        daily_ctx = await coros_client.get_recent_daily_records(days=14)
         daily_dicts = [r.model_dump() for r in daily_ctx]
 
         # 把 HRVRecord 的 standard_deviation 按日期合并进 daily_dicts
         # DailyRecord 拿不到 sd，HRVRecord 才有（来自 /dashboard/query）
+        hrv_records = await coros_client.get_hrv()
         hrv_sd_by_date = {
             r.date: r.standard_deviation
-            for r in coros_client.get_hrv()
+            for r in hrv_records
             if r.standard_deviation is not None
         }
         for d in daily_dicts:
@@ -192,7 +195,7 @@ def injury_risk_check() -> None:
         logger.info("injury_risk_check: risk detected, signals=%s", signals)
         report = analyzer.analyze_risk(signals, daily_dicts)
 
-        store.mark_risk_sent(check_date, signals, report)
+        await store.mark_risk_sent(check_date, signals, report)
         notifier.push(title="⚠️ 伤病风险预警", body=report)
         logger.info("injury_risk_check: pushed for %s", check_date)
 
@@ -201,7 +204,7 @@ def injury_risk_check() -> None:
         notifier.push(title="PaceCoach Error", body=f"风险检测失败：{e}")
 
 
-def weekly_report() -> None:
+async def weekly_report() -> None:
     """
     每周一推送上周训练周报。
     数据来源：
@@ -217,19 +220,19 @@ def weekly_report() -> None:
         week_start_dt = this_monday - timedelta(days=7)
         week_start = week_start_dt.strftime("%Y%m%d")
 
-        if store.is_weekly_report_sent(week_start):
+        if await store.is_weekly_report_sent(week_start):
             logger.info("weekly_report: already sent for week %s, skipping", week_start)
             return
 
         week_end_dt = this_monday - timedelta(days=1)  # 上周周日
 
-        daily_ctx = coros_client.get_recent_daily_records(start_date=week_start_dt, end_date=week_end_dt)
+        daily_ctx = await coros_client.get_recent_daily_records(start_date=week_start_dt, end_date=week_end_dt)
         daily_dicts = [r.model_dump() for r in daily_ctx]
 
-        activities = coros_client.get_recent_activities(start_date=week_start_dt, end_date=week_end_dt)
+        activities = await coros_client.get_recent_activities(start_date=week_start_dt, end_date=week_end_dt)
         sessions = []
         for act in activities:
-            detail = coros_client.get_activity_detail(act.activity_id, act.sport_type or 0)
+            detail = await coros_client.get_activity_detail(act.activity_id, act.sport_type or 0)
             s = detail.get("summary", {})
             weather = detail.get("weather", {})
             temp_raw = weather.get("temperature")
@@ -246,7 +249,7 @@ def weekly_report() -> None:
         logger.info("weekly_report: week=%s, sessions=%d", week_start, len(sessions))
         report = analyzer.analyze_weekly(daily_dicts, sessions, week_start)
 
-        store.mark_weekly_report_sent(week_start, daily_dicts, sessions, report)
+        await store.mark_weekly_report_sent(week_start, daily_dicts, sessions, report)
         notifier.push(title="📊 本周训练周报", body=report)
         logger.info("weekly_report: pushed for week %s", week_start)
 
