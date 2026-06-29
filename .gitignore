@@ -5,3 +5,4 @@ docs/
 *.pyc
 *.db
 .coros_token.json
+.env.local

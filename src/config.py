@@ -14,8 +14,7 @@ class Settings(BaseSettings):
     db_url: str = "sqlite:///pacecoach.db"
     poll_interval_minutes: int = 10
 
-    class Config:
-        env_file = ".env"
+    model_config = {"env_file": [".env", ".env.local"], "extra": "ignore"}
 
 
 settings = Settings()

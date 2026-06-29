@@ -11,3 +11,4 @@ openai
 fastapi[standard]
 uvicorn
 asyncpg
+alembic

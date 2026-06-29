@@ -17,9 +17,15 @@ from sqlalchemy.orm import DeclarativeBase
 
 from src.config import settings
 
-# asyncpg 驱动要求连接串格式为 postgresql+asyncpg://
-# .env 中直接写这个格式，不在代码层做转换
-engine = create_async_engine(settings.db_url)
+# engine 延迟初始化：第一次调用 get_engine() 时才创建
+# 避免 import store 时立刻读 settings.db_url，让 alembic/env.py 有机会先覆盖环境变量
+_engine = None
+
+def get_engine():
+    global _engine
+    if _engine is None:
+        _engine = create_async_engine(settings.db_url)
+    return _engine
 
 
 class Base(DeclarativeBase):
@@ -81,31 +87,31 @@ class RunLog(Base):
 async def init_db():
     # create_all 只建不存在的表，不会修改已有表结构
     # 表结构变更需要 Alembic 迁移脚本管理（待补）
-    async with engine.begin() as conn:
+    async with get_engine().begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
 
 async def is_processed(label_id: str) -> bool:
     # 每次调用开一个短生命周期 session，查完即关
-    async with AsyncSession(engine) as session:
+    async with AsyncSession(get_engine()) as session:
         return await session.get(ProcessedActivity, label_id) is not None
 
 
 async def mark_processed(label_id: str):
     # add()：只能插入新记录，主键冲突直接报错（IntegrityError）
     # 语义是"这条记录必须是第一次写入"，比静默覆盖更严格，能暴露重复调用的 bug
-    async with AsyncSession(engine) as session:
+    async with AsyncSession(get_engine()) as session:
         session.add(ProcessedActivity(label_id=label_id))
         await session.commit()
 
 
 async def is_morning_report_sent(sleep_date: str) -> bool:
-    async with AsyncSession(engine) as session:
+    async with AsyncSession(get_engine()) as session:
         return await session.get(MorningLog, sleep_date) is not None
 
 
 async def mark_morning_report_sent(sleep_date: str, sleep: dict, hrv: dict, daily: list, report: str):
-    async with AsyncSession(engine) as session:
+    async with AsyncSession(get_engine()) as session:
         # merge()：主键存在则覆盖，不存在则插入；重跑时安全覆盖旧记录
         await session.merge(MorningLog(
             sleep_date=sleep_date,
@@ -118,12 +124,12 @@ async def mark_morning_report_sent(sleep_date: str, sleep: dict, hrv: dict, dail
 
 
 async def is_risk_sent(check_date: str) -> bool:
-    async with AsyncSession(engine) as session:
+    async with AsyncSession(get_engine()) as session:
         return await session.get(RiskLog, check_date) is not None
 
 
 async def mark_risk_sent(check_date: str, signals: list, report: str):
-    async with AsyncSession(engine) as session:
+    async with AsyncSession(get_engine()) as session:
         # merge()：主键存在则覆盖，不存在则插入；重跑时安全覆盖旧记录
         await session.merge(RiskLog(
             check_date=check_date,
@@ -134,12 +140,12 @@ async def mark_risk_sent(check_date: str, signals: list, report: str):
 
 
 async def is_weekly_report_sent(week_start: str) -> bool:
-    async with AsyncSession(engine) as session:
+    async with AsyncSession(get_engine()) as session:
         return await session.get(WeeklyLog, week_start) is not None
 
 
 async def mark_weekly_report_sent(week_start: str, daily: list, sessions: list, report: str):
-    async with AsyncSession(engine) as session:
+    async with AsyncSession(get_engine()) as session:
         # merge()：主键存在则覆盖，不存在则插入；重跑时安全覆盖旧记录
         await session.merge(WeeklyLog(
             week_start=week_start,
@@ -151,7 +157,7 @@ async def mark_weekly_report_sent(week_start: str, daily: list, sessions: list, 
 
 
 async def save_run_log(label_id: str, activity: dict, daily: dict, coaching: str):
-    async with AsyncSession(engine) as session:
+    async with AsyncSession(get_engine()) as session:
         # merge()：主键存在则更新，不存在则插入（upsert）
         # 同一活动因失败重跑时需要覆盖旧记录，所以用 merge 而不是 add
         await session.merge(RunLog(
