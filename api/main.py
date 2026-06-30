@@ -6,7 +6,6 @@ from fastapi import FastAPI
 
 from api.routes.health import router as health_router
 from api.routes.jobs import router as jobs_router
-from src import store
 from src.config import settings
 from src.jobs import on_new_activity, morning_report, injury_risk_check, weekly_report
 
@@ -18,8 +17,6 @@ logging.basicConfig(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await store.init_db()
-
     scheduler = AsyncIOScheduler()
     scheduler.add_job(
         on_new_activity,
