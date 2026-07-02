@@ -12,3 +12,6 @@ fastapi[standard]
 uvicorn
 asyncpg
 alembic
+bcrypt
+pyjwt
+email-validator

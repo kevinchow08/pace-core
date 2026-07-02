@@ -11,7 +11,7 @@ Tables:
 import json
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, String, Text
+from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text, select
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import DeclarativeBase
 
@@ -31,6 +31,17 @@ def get_engine():
 class Base(DeclarativeBase):
     # SQLAlchemy 从这个 Base 的 metadata 中读取所有 ORM 模型，用于建表
     pass
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    email = Column(String, unique=True, nullable=False, index=True)
+    password_hash = Column(String, nullable=False)
+    role = Column(String, default="free")  # free / paid
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
 class ProcessedActivity(Base):
@@ -167,3 +178,23 @@ async def save_run_log(label_id: str, activity: dict, daily: dict, coaching: str
             coaching=coaching,
         ))
         await session.commit()
+
+
+async def get_user_by_email(email: str) -> User | None:
+    async with AsyncSession(get_engine()) as session:
+        result = await session.execute(select(User).where(User.email == email))
+        return result.scalar_one_or_none()
+
+
+async def get_user_by_id(user_id: int) -> User | None:
+    async with AsyncSession(get_engine()) as session:
+        return await session.get(User, user_id)
+
+
+async def create_user(email: str, password_hash: str) -> User:
+    async with AsyncSession(get_engine()) as session:
+        user = User(email=email, password_hash=password_hash)
+        session.add(user)
+        await session.commit()
+        await session.refresh(user)  # 拿到数据库生成的 id、created_at
+        return user

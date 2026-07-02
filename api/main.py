@@ -5,6 +5,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI
 
 from api.errors import register_exception_handlers
+from api.routes.auth import router as auth_router
 from api.routes.health import router as health_router
 from api.routes.jobs import router as jobs_router
 from src.config import settings
@@ -59,3 +60,4 @@ app = FastAPI(title="PaceCoach API", version="0.1.0", lifespan=lifespan)
 register_exception_handlers(app)
 app.include_router(health_router)
 app.include_router(jobs_router, prefix="/jobs")
+app.include_router(auth_router, prefix="/auth")

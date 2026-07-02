@@ -14,6 +14,9 @@ class Settings(BaseSettings):
     db_url: str = "sqlite:///pacecoach.db"
     poll_interval_minutes: int = 10
 
+    jwt_secret_key: str
+    jwt_expire_minutes: int = 60 * 24 * 7  # 7天
+
     model_config = {"env_file": [".env", ".env.local"], "extra": "ignore"}
 
 
