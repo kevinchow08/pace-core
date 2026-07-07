@@ -18,13 +18,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-from src import store
 from src.jobs import on_new_activity, morning_report, injury_risk_check, weekly_report
 
 
 async def main():
-    await store.init_db()
-
     if "--once" in sys.argv:
         logger.info("--once mode: running on_new_activity and exiting")
         await on_new_activity()

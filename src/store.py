@@ -21,6 +21,7 @@ from src.config import settings
 # 避免 import store 时立刻读 settings.db_url，让 alembic/env.py 有机会先覆盖环境变量
 _engine = None
 
+
 def get_engine():
     global _engine
     if _engine is None:
@@ -93,13 +94,6 @@ class RunLog(Base):
     raw_daily = Column(Text)
     coaching = Column(Text)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-
-
-async def init_db():
-    # create_all 只建不存在的表，不会修改已有表结构
-    # 表结构变更需要 Alembic 迁移脚本管理（待补）
-    async with get_engine().begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
 
 
 async def is_processed(label_id: str) -> bool:

@@ -17,9 +17,13 @@ import os
 import random
 import time
 
+import logging
+
 import httpx
 
 from .auth_storage import get_token, store_token
+
+logger = logging.getLogger(__name__)
 from .models import (
     ActivitySummary,
     DailyRecord,
@@ -131,6 +135,7 @@ async def _mobile_login(email: str, password: str, region: str = "cn") -> tuple[
     Authenticate against the Coros mobile API with encrypted credentials.
     Returns (access_token, login_payload_for_replay).
     """
+    logger.warning("COROS mobile login triggered — this will likely kick out the phone's COROS app session")
     mobile_base = MOBILE_BASE_URLS.get(region, MOBILE_BASE_URLS["cn"])
     url = mobile_base + MOBILE_LOGIN_ENDPOINT
     app_key = str(random.randint(1_000_000_000_000_000, 9_999_999_999_999_999))
