@@ -17,8 +17,10 @@ class BizCode(StrEnum):
 
     # 用户 — 比通用码更精确，供 App 做针对性处理
     USER_NOT_FOUND = "USER_NOT_FOUND"   # 404 用户不存在
-    PASSWORD_WRONG = "PASSWORD_WRONG"   # 401 密码错误
-    EMAIL_EXISTS = "EMAIL_EXISTS"       # 409 邮箱已注册
+
+    # COROS 集成 —— App 端登录 COROS，后端只验证/转发 token，不托管密码
+    COROS_TOKEN_INVALID = "COROS_TOKEN_INVALID"  # 401 App 传来的 COROS token 无效或已过期，
+                                                   # App 需要静默用本地 Keychain 账密重新登录 COROS 后重试
 
 
 # 每个业务错误码对应的 HTTP 状态码，集中维护
@@ -31,8 +33,7 @@ _HTTP_STATUS: dict[BizCode, int] = {
     BizCode.INTERNAL_ERROR: 500,
     BizCode.SERVICE_UNAVAILABLE: 503,
     BizCode.USER_NOT_FOUND: 404,
-    BizCode.PASSWORD_WRONG: 401,
-    BizCode.EMAIL_EXISTS: 409,
+    BizCode.COROS_TOKEN_INVALID: 401,
 }
 
 

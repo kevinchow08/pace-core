@@ -1,28 +1,29 @@
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr
 
 from fastapi import APIRouter, Depends
 
 from api.deps import get_current_user
 from api.errors import BizCode, BizException
-from src.auth import create_access_token, hash_password, verify_password
-from src.store import User, create_user, get_user_by_email
+from src import coros_client
+from src.auth import create_access_token
+from src.store import User, get_or_create_user
 
 router = APIRouter()
 
 
-class RegisterRequest(BaseModel):
-    email: EmailStr
-    password: str = Field(min_length=6)
-
-
 class LoginRequest(BaseModel):
-    email: EmailStr
-    password: str
+    # App 端已经用用户输入的账密直接登录过 COROS，这里只转交登录结果，
+    # 不再传密码——后端从不接触明文密码。
+    coros_access_token: str
+    coros_user_id: str
+    coros_region: str = "cn"
+    # 仅用于展示，不作为身份验证依据（真正的身份来自 coros_user_id）
+    email: EmailStr | None = None
 
 
 class UserResponse(BaseModel):
     id: int
-    email: str
+    email: str | None
     role: str
 
 
@@ -35,25 +36,16 @@ def _to_user_response(user: User) -> UserResponse:
     return UserResponse(id=user.id, email=user.email, role=user.role)
 
 
-@router.post("/register", status_code=201, response_model=UserResponse)
-async def register(body: RegisterRequest):
-    existing = await get_user_by_email(body.email)
-    if existing is not None:
-        raise BizException(BizCode.EMAIL_EXISTS, "该邮箱已注册")
-
-    user = await create_user(body.email, hash_password(body.password))
-    return _to_user_response(user)
-
-
 @router.post("/login", response_model=TokenResponse)
 async def login(body: LoginRequest):
-    user = await get_user_by_email(body.email)
-    if user is None:
-        raise BizException(BizCode.USER_NOT_FOUND, "账号不存在")
+    auth = coros_client.build_auth(body.coros_access_token, body.coros_user_id, body.coros_region)
 
-    if not verify_password(body.password, user.password_hash):
-        raise BizException(BizCode.PASSWORD_WRONG, "密码错误")
+    # 拿 token 反查 COROS，验证是不是真的登录成功过，不是客户端伪造的
+    valid = await coros_client.verify_token(auth)
+    if not valid:
+        raise BizException(BizCode.COROS_TOKEN_INVALID, "COROS 登录状态无效，请重新登录")
 
+    user = await get_or_create_user(body.coros_user_id, body.email)
     token = create_access_token(user.id, user.role)
     return TokenResponse(access_token=token)
 
