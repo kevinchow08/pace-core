@@ -20,11 +20,22 @@ from coros_lib.coros_api import (
 from coros_lib.models import StoredAuth
 
 
-def build_auth(access_token: str, coros_user_id: str, region: str = "cn") -> StoredAuth:
+def build_auth(
+    access_token: str,
+    coros_user_id: str,
+    region: str = "cn",
+    mobile_access_token: str | None = None,
+) -> StoredAuth:
     """
     用 App 端登录 COROS 后拿到的 token 直接构造 auth，不经过后端登录流程。
     timestamp 设为当前时间——这里只是满足 StoredAuth 的字段要求，
     后端不使用它做过期判断（过期判断和刷新完全交给 App 端负责）。
+
+    mobile_access_token 只有晨报（睡眠数据）需要——COROS 的活动/HRV 数据走
+    web session，睡眠数据走另一条独立的 mobile session，两者互不相通。
+    不传这个字段时，绝不能指望 coros_lib 内部的兜底逻辑（那个兜底是读
+    os.environ 里的全局账密，是 Phase 1 单用户时代的遗留行为，多用户场景下
+    用了会导致所有用户的睡眠请求都用同一个账号去登录，串号）。
     """
     import time
     return StoredAuth(
@@ -32,6 +43,7 @@ def build_auth(access_token: str, coros_user_id: str, region: str = "cn") -> Sto
         user_id=coros_user_id,
         region=region,
         timestamp=int(time.time() * 1000),
+        mobile_access_token=mobile_access_token,
     )
 
 

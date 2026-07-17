@@ -214,3 +214,45 @@ async def get_or_create_user(coros_user_id: str, email: str | None) -> User:
         await session.commit()
         await session.refresh(user)
         return user
+
+
+# ---------------------------------------------------------------------------
+# Feed：把四张业务表合并成一条时间线，应用层拼接（数据量小，不用 UNION）
+# ---------------------------------------------------------------------------
+
+# (表, 时间字段名, 业务主键字段名, feed 展示用的类型名, 摘要内容字段名)
+_FEED_SOURCES = [
+    (RunLog, "created_at", "id", "run", "coaching"),
+    (MorningLog, "sent_at", "sleep_date", "morning", "report"),
+    (RiskLog, "sent_at", "check_date", "risk", "report"),
+    (WeeklyLog, "sent_at", "week_start", "weekly", "report"),
+]
+
+
+async def get_feed_items(user_id: int, before: datetime | None, limit: int) -> list[dict]:
+    """
+    四张表分别查（各自最多 limit 条，避免全表扫描），拼到一起按时间倒序，
+    再截取真正需要的 limit 条。before 是"时间游标"：传上一页最后一条的时间戳，
+    只取更早的记录，实现翻页。
+    """
+    async with AsyncSession(get_engine()) as session:
+        merged: list[dict] = []
+
+        for model, ts_field, id_field, type_name, summary_field in _FEED_SOURCES:
+            ts_column = getattr(model, ts_field)
+            stmt = select(model).where(model.user_id == user_id)
+            if before is not None:
+                stmt = stmt.where(ts_column < before)
+            stmt = stmt.order_by(ts_column.desc()).limit(limit)
+
+            rows = (await session.execute(stmt)).scalars().all()
+            for row in rows:
+                merged.append({
+                    "id": str(getattr(row, id_field)),
+                    "type": type_name,
+                    "timestamp": getattr(row, ts_field),
+                    "summary": getattr(row, summary_field),
+                })
+
+        merged.sort(key=lambda item: item["timestamp"], reverse=True)
+        return merged[:limit]
