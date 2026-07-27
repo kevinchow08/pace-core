@@ -6,14 +6,55 @@ analyze_sleep(): stubbed, activated in v0.1 when sleep data is available
 """
 import logging
 
-from openai import OpenAI
+from openai import (
+    OpenAI,
+    APIConnectionError,
+    APITimeoutError,
+    InternalServerError,
+    RateLimitError,
+)
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from src.config import settings
 from src.formatter import format_activity, format_daily_ctx, format_morning_ctx, format_weekly_ctx
+from src.resilience import CircuitBreaker
 
 logger = logging.getLogger(__name__)
 
 _client = OpenAI(api_key=settings.llm_api_key, base_url=settings.llm_base_url)
+
+# 只有这几类错误算"服务瞬时不可用"，值得重试、也才计入熔断失败次数：
+# 网络连接问题、超时、限流、LLM 服务端 5xx。
+# 密钥错误（AuthenticationError）、请求体不合法（BadRequestError）这类是我们
+# 自己的问题，不代表 LLM 服务挂了，重试没有意义，也不该触发熔断。
+_RETRYABLE_LLM_ERRORS = (APIConnectionError, APITimeoutError, RateLimitError, InternalServerError)
+
+_llm_breaker = CircuitBreaker(name="LLM", failure_threshold=5, recovery_timeout=60)
+
+
+@retry(
+    retry=retry_if_exception_type(_RETRYABLE_LLM_ERRORS),
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    reraise=True,
+)
+def _call_llm_with_retry(model: str, max_tokens: int, messages: list[dict]):
+    """只负责重试，完全不碰熔断器——熔断器要统计的是"一次外部调用"的
+    成败，不该被这里内部重试了几次影响到。"""
+    return _client.chat.completions.create(model=model, max_tokens=max_tokens, messages=messages)
+
+
+def _call_llm(model: str, max_tokens: int, messages: list[dict]):
+    """真正对外的入口：熔断器只在这一层记录一次，内部重试（最多3次）对它不可见。"""
+    _llm_breaker.before_call()
+    try:
+        response = _call_llm_with_retry(model, max_tokens, messages)
+    except _RETRYABLE_LLM_ERRORS:
+        _llm_breaker.record_failure()
+        raise
+    else:
+        _llm_breaker.record_success()
+        return response
 
 _WORKOUT_SYSTEM = """你是一位专业跑步教练，根据运动员的训练数据和近期训练趋势给出详细点评。
 
@@ -93,7 +134,7 @@ def analyze_workout(activities: list[dict] | dict, daily_ctx: list[dict]) -> str
         len(activities),
         settings.llm_model,
     )
-    response = _client.chat.completions.create(
+    response = _call_llm(
         model=settings.llm_model,
         max_tokens=1024,
         messages=[
@@ -167,7 +208,7 @@ def analyze_morning(sleep: dict, hrv: dict, daily_records: list[dict]) -> str:
 
     logger.info("Morning report context:\n%s", ctx)
     logger.info("Calling LLM for morning report, model=%s", settings.llm_model)
-    response = _client.chat.completions.create(
+    response = _call_llm(
         model=settings.llm_model,
         max_tokens=768,
         messages=[
@@ -206,7 +247,7 @@ def analyze_risk(signals: list[str], daily_records: list[dict]) -> str:
 请给出伤病风险预警。"""
 
     logger.info("Calling LLM for risk analysis, signals=%s", signals)
-    response = _client.chat.completions.create(
+    response = _call_llm(
         model=settings.llm_model,
         max_tokens=512,
         messages=[
@@ -244,7 +285,7 @@ def analyze_weekly(daily_records: list[dict], sessions: list[dict], week_start: 
 
     logger.info("Weekly report context:\n%s", ctx)
     logger.info("Calling LLM for weekly report, model=%s", settings.llm_model)
-    response = _client.chat.completions.create(
+    response = _call_llm(
         model=settings.llm_model,
         max_tokens=768,
         messages=[

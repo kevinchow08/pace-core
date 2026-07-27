@@ -11,3 +11,4 @@ uvicorn
 asyncpg
 alembic
 pyjwt
+tenacity
